@@ -44,8 +44,16 @@ jobs:
 
           if (-not $resolved) {
             Write-Host "$pkg missing; installing deterministic fallback version $ver"
-            pnpm add -Dw "$pkg@$ver" --no-frozen-lockfile
-            $resolved = node -e "console.log(require.resolve('@libsql/win32-x64-msvc/package.json'))"
+            pnpm add -Dw "$pkg@$ver" --save-exact
+            try {
+              $resolved = node -e "console.log(require.resolve('@libsql/win32-x64-msvc/package.json'))"
+            } catch {
+              $resolved = ""
+            }
+          }
+
+          if (-not $resolved) {
+            throw "Unable to resolve $pkg after installation"
           }
 
           Write-Host "Resolved $pkg at $resolved"
