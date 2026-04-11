@@ -35,6 +35,6 @@
       "icons/icon.ico",
       "icons/icon.icns"
     ],
-    "resources": ["resources/backend/**", "resources/runtime/**", "resources/bin/**"]
+    "resources": ["resources/backend", "resources/runtime", "resources/bin"]
   }
 }

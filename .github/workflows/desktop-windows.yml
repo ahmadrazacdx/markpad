@@ -193,6 +193,27 @@ jobs:
             }
           }
 
+      - name: Validate staged Tauri resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $resourceRoot = "artifacts/artifacts/markpad/src-tauri/resources"
+          $requiredDirs = @("backend", "runtime", "bin")
+
+          foreach ($dir in $requiredDirs) {
+            $path = Join-Path $resourceRoot $dir
+            if (-not (Test-Path $path)) {
+              throw "Missing required resource directory: $path"
+            }
+
+            $fileCount = (Get-ChildItem -Path $path -Recurse -File -ErrorAction Stop | Measure-Object).Count
+            if ($fileCount -lt 1) {
+              throw "Resource directory is empty: $path"
+            }
+          }
+
+          Write-Host "Tauri resource validation passed"
+
       - name: Build NSIS installer (.exe)
         run: pnpm --filter @workspace/markpad run tauri:build:windows
 
