@@ -109,47 +109,47 @@ jobs:
             }
 
             $wsScript = @"
-const timeout = setTimeout(() => {
-  console.error('preview websocket timed out');
-  process.exit(1);
-}, 20000);
+            const timeout = setTimeout(() => {
+              console.error('preview websocket timed out');
+              process.exit(1);
+            }, 20000);
 
-const ws = new WebSocket('ws://127.0.0.1:18080/api/ws/preview');
+            const ws = new WebSocket('ws://127.0.0.1:18080/api/ws/preview');
 
-ws.onopen = () => {
-  ws.send(JSON.stringify({
-    projectId: 1,
-    content: '# CI smoke test\n\nWebSocket preview should return a PDF.',
-    options: {
-      pageSize: 'a4',
-      documentFont: 'latin-modern',
-      fontSizePt: 11,
-      lineStretch: 1.1,
-    },
-  }));
-};
+            ws.onopen = () => {
+              ws.send(JSON.stringify({
+                projectId: 1,
+                content: '# CI smoke test\n\nWebSocket preview should return a PDF.',
+                options: {
+                  pageSize: 'a4',
+                  documentFont: 'latin-modern',
+                  fontSizePt: 11,
+                  lineStretch: 1.1,
+                },
+              }));
+            };
 
-ws.onmessage = async (event) => {
-  if (event.data instanceof Blob) {
-    const buf = Buffer.from(await event.data.arrayBuffer());
-    if (buf.length < 100) {
-      console.error('preview pdf payload too small');
-      process.exit(1);
-    }
-    clearTimeout(timeout);
-    ws.close();
-    process.exit(0);
-  }
+            ws.onmessage = async (event) => {
+              if (event.data instanceof Blob) {
+                const buf = Buffer.from(await event.data.arrayBuffer());
+                if (buf.length < 100) {
+                  console.error('preview pdf payload too small');
+                  process.exit(1);
+                }
+                clearTimeout(timeout);
+                ws.close();
+                process.exit(0);
+              }
 
-  console.error('unexpected preview response', String(event.data));
-  process.exit(1);
-};
+              console.error('unexpected preview response', String(event.data));
+              process.exit(1);
+            };
 
-ws.onerror = () => {
-  console.error('preview websocket error');
-  process.exit(1);
-};
-"@
+            ws.onerror = () => {
+              console.error('preview websocket error');
+              process.exit(1);
+            };
+            "@
 
             & $nodeExe -e $wsScript
           } finally {
