@@ -7,20 +7,18 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
@@ -31,11 +29,11 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --no-frozen-lockfile --force
 
-      - name: Validate Windows native frontend bindings
+      - name: Validate frontend toolchain by loading Vite config
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          node -e "require('@tailwindcss/oxide'); require('lightningcss'); require('rollup'); require('esbuild'); console.log('native frontend bindings OK')"
+          pnpm --filter @workspace/markpad exec node --input-type=module -e "import { loadConfigFromFile } from 'vite'; const loaded = await loadConfigFromFile({ command: 'build', mode: 'production' }, 'vite.config.ts'); if (!loaded) { throw new Error('Vite config did not load'); } console.log('vite config load OK');"
 
       - name: Typecheck workspace
         run: pnpm run typecheck
