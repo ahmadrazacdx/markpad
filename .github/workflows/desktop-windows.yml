@@ -29,6 +29,27 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --no-frozen-lockfile --force
 
+      - name: Ensure libsql Windows native module
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pkg = "@libsql/win32-x64-msvc"
+          $ver = "0.5.29"
+
+          $resolved = ""
+          try {
+            $resolved = node -e "console.log(require.resolve('@libsql/win32-x64-msvc/package.json'))"
+          } catch {
+          }
+
+          if (-not $resolved) {
+            Write-Host "$pkg missing; installing deterministic fallback version $ver"
+            pnpm add -Dw "$pkg@$ver" --no-frozen-lockfile
+            $resolved = node -e "console.log(require.resolve('@libsql/win32-x64-msvc/package.json'))"
+          }
+
+          Write-Host "Resolved $pkg at $resolved"
+
       - name: Validate frontend toolchain by loading Vite config
         shell: pwsh
         run: |
