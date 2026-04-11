@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -40,11 +42,43 @@ fn resolve_resource_path(app: &tauri::AppHandle, relative: &str) -> Result<PathB
     Ok(resource_dir.join(relative))
 }
 
+fn resolve_existing_resource_path(
+    app: &tauri::AppHandle,
+    candidates: &[&str],
+    label: &str,
+) -> Result<PathBuf, String> {
+    let mut attempted = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        let path = resolve_resource_path(app, candidate)?;
+        attempted.push(path.display().to_string());
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+
+    Err(format!(
+        "{label} not found. Looked in: {}",
+        attempted.join(", ")
+    ))
+}
+
 fn spawn_backend(app: &tauri::AppHandle) -> Result<Child, String> {
-    let node_dir = resolve_resource_path(app, "runtime/node")?;
+    let node_dir = resolve_existing_resource_path(
+        app,
+        &["runtime/node", "resources/runtime/node"],
+        "Bundled Node runtime directory",
+    )?;
     let node_bin = node_dir.join(platform_executable("node"));
-    let backend_entry = resolve_resource_path(app, "backend/dist/index.mjs")?;
-    let bundled_bin_dir = resolve_resource_path(app, "bin")?;
+    let backend_entry = resolve_existing_resource_path(
+        app,
+        &["backend/dist/index.mjs", "resources/backend/dist/index.mjs"],
+        "Bundled backend entry",
+    )?;
+    let bundled_bin_dir = resolve_existing_resource_path(
+        app,
+        &["bin", "resources/bin"],
+        "Bundled binary directory",
+    )?;
 
     if !node_bin.exists() {
         return Err(format!("Bundled Node runtime not found: {}", node_bin.display()));
