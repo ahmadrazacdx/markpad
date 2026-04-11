@@ -200,6 +200,91 @@ router.delete("/projects/:projectId/files/:filePath", async (req, res) => {
   }
 });
 
+router.patch("/projects/:projectId/files/rename", async (req, res) => {
+  try {
+    const { projectId } = CreateFileParams.parse(req.params);
+    const fromPathRaw = typeof req.body?.fromPath === "string" ? req.body.fromPath : "";
+    const toPathRaw = typeof req.body?.toPath === "string" ? req.body.toPath : "";
+
+    if (!fromPathRaw.trim() || !toPathRaw.trim()) {
+      res.status(400).json({ error: "fromPath and toPath are required" });
+      return;
+    }
+
+    const fromPathInput = fromPathRaw.trim().replace(/^\/+/, "");
+    const toPathInput = toPathRaw.trim().replace(/^\/+/, "");
+
+    if (fromPathInput.endsWith("/") || toPathInput.endsWith("/")) {
+      res.status(400).json({ error: "Only file paths can be renamed" });
+      return;
+    }
+
+    const fromPath = fromPathInput.replace(/\/+$/, "");
+    let toPath = toPathInput.replace(/\/+$/, "");
+
+    if (!fromPath || !toPath) {
+      res.status(400).json({ error: "Invalid file path" });
+      return;
+    }
+
+    if (fromPath.startsWith("assets/") || toPath.startsWith("assets/")) {
+      res.status(400).json({ error: "Use assets rename endpoint for assets paths" });
+      return;
+    }
+
+    // Markdown files must remain markdown even if client drops the extension.
+    if (fromPath.toLowerCase().endsWith(".md") && !toPath.toLowerCase().endsWith(".md")) {
+      toPath = `${toPath}.md`;
+    }
+
+    if (fromPath === toPath) {
+      res.json({ path: toPath, name: toFileName(toPath), success: true });
+      return;
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const [renamedFile] = await tx
+        .update(filesTable)
+        .set({ path: toPath, name: toFileName(toPath) })
+        .where(and(eq(filesTable.projectId, projectId), eq(filesTable.path, fromPath)))
+        .returning({ path: filesTable.path, name: filesTable.name });
+
+      if (!renamedFile) {
+        return null;
+      }
+
+      await tx
+        .update(snapshotsTable)
+        .set({ filePath: toPath })
+        .where(
+          and(
+            eq(snapshotsTable.projectId, projectId),
+            eq(snapshotsTable.filePath, fromPath),
+          ),
+        );
+
+      return renamedFile;
+    });
+
+    if (!updated) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+
+    res.json({ path: updated.path, name: updated.name, success: true });
+  } catch (err) {
+    if (isPgUniqueViolation(err)) {
+      res.status(409).json({ error: "Destination path already exists" });
+      return;
+    }
+
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to rename file",
+      publicMessage: "Failed to rename file",
+    });
+  }
+});
+
 router.post("/projects/:projectId/assets/folders", async (req, res) => {
   try {
     const { projectId } = CreateFileParams.parse(req.params);

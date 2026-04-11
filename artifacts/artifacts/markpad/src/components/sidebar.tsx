@@ -115,6 +115,21 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
     }
     return fallback;
   };
+
+  const getApiErrorMessage = async (response: Response, fallback: string) => {
+    try {
+      const payload = await response.json() as { error?: unknown; message?: unknown };
+      if (typeof payload?.error === "string" && payload.error.trim()) {
+        return payload.error;
+      }
+      if (typeof payload?.message === "string" && payload.message.trim()) {
+        return payload.message;
+      }
+    } catch {
+      // Ignore non-JSON responses and fall back to default error message.
+    }
+    return fallback;
+  };
   
   const projectsQuery = useListProjects();
   const filesQuery = useListFiles(projectId as number, { query: { enabled: !!projectId, queryKey: getListFilesQueryKey(projectId as number) } });
@@ -154,6 +169,8 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
   const [isAssetsExpanded, setIsAssetsExpanded] = useState(false);
   const [isNewAssetFolderOpen, setIsNewAssetFolderOpen] = useState(false);
   const [newAssetFolderName, setNewAssetFolderName] = useState("");
+  const [renamingFilePath, setRenamingFilePath] = useState<string | null>(null);
+  const [renameFileName, setRenameFileName] = useState("");
   const [renamingAssetPath, setRenamingAssetPath] = useState<string | null>(null);
   const [renameAssetName, setRenameAssetName] = useState("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -396,6 +413,10 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
 
   const handleDeleteAsset = async (filePath: string) => {
     if (!projectId) return;
+    if (!confirm(`Delete ${filePath.endsWith("/") ? "folder" : "file"} \"${filePath.replace(/^assets\//, "")}\"?`)) {
+      return;
+    }
+
     const filesKey = getListFilesQueryKey(projectId);
     const previousFiles = queryClient.getQueryData(filesKey) as unknown[] | undefined;
 
@@ -425,6 +446,11 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
     }
 
     const trimmedName = renameAssetName.trim();
+    if (trimmedName.includes("/")) {
+      toast({ title: "Name cannot include /", variant: "destructive" });
+      return;
+    }
+
     const isFolder = oldPath.endsWith("/");
     const oldParts = oldPath.split("/").filter(Boolean);
     const parentParts = isFolder ? oldParts.slice(0, -1) : oldParts.slice(0, -1);
@@ -470,11 +496,144 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
         body: JSON.stringify({ fromPath: oldPath, toPath: newPath }),
       });
 
-      if (!response.ok) throw new Error("Rename failed");
+      if (!response.ok) {
+        const message = await getApiErrorMessage(response, "Rename failed");
+        throw new Error(message);
+      }
       toast({ title: "Asset renamed" });
     } catch (err) {
       queryClient.setQueryData(filesKey, previousFiles ?? []);
-      toast({ title: "Error renaming asset", variant: "destructive" });
+      toast({ title: getErrorMessage(err, "Error renaming asset"), variant: "destructive" });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: filesKey });
+    }
+  };
+
+  const handleDeleteRootFile = async (filePath: string) => {
+    if (!projectId) return;
+    if (!confirm(`Delete file \"${filePath}\"?`)) {
+      return;
+    }
+
+    const filesKey = getListFilesQueryKey(projectId);
+    const previousFiles = queryClient.getQueryData(filesKey) as unknown[] | undefined;
+    const previousSelectedFile = selectedFile;
+    const fallbackPath = rootFiles
+      .filter((entry) => entry.path !== filePath)
+      .sort((a, b) => {
+        if (a.path === "main.md") return -1;
+        if (b.path === "main.md") return 1;
+        return a.path.localeCompare(b.path);
+      })[0]?.path;
+
+    queryClient.setQueryData(filesKey, (old: unknown) => {
+      const items = (Array.isArray(old) ? old : []) as FileEntry[];
+      return items.filter((entry) => entry.path !== filePath);
+    });
+
+    if (selectedFile === filePath) {
+      if (fallbackPath) {
+        onFileSelect(fallbackPath);
+      } else {
+        onProjectSelect(projectId);
+      }
+    }
+
+    try {
+      await deleteFile.mutateAsync({ projectId, filePath });
+      toast({ title: "File deleted" });
+    } catch (err) {
+      queryClient.setQueryData(filesKey, previousFiles ?? []);
+      if (previousSelectedFile) {
+        onFileSelect(previousSelectedFile);
+      }
+      toast({ title: "Error deleting file", variant: "destructive" });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: filesKey });
+    }
+  };
+
+  const handleRenameRootFile = async (oldPath: string) => {
+    if (!projectId || !renameFileName.trim()) {
+      setRenamingFilePath(null);
+      return;
+    }
+
+    let trimmedName = renameFileName.trim();
+    if (trimmedName.includes("/")) {
+      toast({ title: "Name cannot include /", variant: "destructive" });
+      return;
+    }
+
+    if (oldPath.endsWith(".md") && !trimmedName.toLowerCase().endsWith(".md")) {
+      trimmedName = `${trimmedName}.md`;
+    }
+
+    const oldParts = oldPath.split("/").filter(Boolean);
+    const parentParts = oldParts.slice(0, -1);
+    const newPath = [...parentParts, trimmedName].join("/");
+
+    if (!newPath || newPath === oldPath) {
+      setRenamingFilePath(null);
+      return;
+    }
+
+    const filesKey = getListFilesQueryKey(projectId);
+    const previousFiles = queryClient.getQueryData(filesKey) as FileEntry[] | undefined;
+
+    queryClient.setQueryData(filesKey, (old: unknown) => {
+      const items = (Array.isArray(old) ? old : []) as FileEntry[];
+      return items.map((entry) => {
+        if (entry.path !== oldPath) return entry;
+        return {
+          ...entry,
+          path: newPath,
+          name: newPath.split("/").pop() ?? entry.name,
+        };
+      });
+    });
+
+    setRenamingFilePath(null);
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/files/rename`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromPath: oldPath, toPath: newPath }),
+      });
+
+      if (!response.ok) {
+        const message = await getApiErrorMessage(response, "Rename failed");
+        throw new Error(message);
+      }
+
+      const payload = await response.json() as { path?: unknown };
+      const resolvedPath = typeof payload.path === "string" && payload.path.trim().length > 0
+        ? payload.path
+        : newPath;
+
+      if (resolvedPath !== newPath) {
+        queryClient.setQueryData(filesKey, (old: unknown) => {
+          const items = (Array.isArray(old) ? old : []) as FileEntry[];
+          return items.map((entry) => {
+            if (entry.path !== newPath) return entry;
+            return {
+              ...entry,
+              path: resolvedPath,
+              name: resolvedPath.split("/").pop() ?? entry.name,
+            };
+          });
+        });
+      }
+
+      if (selectedFile === oldPath) {
+        onFileSelect(resolvedPath);
+      }
+
+      toast({ title: "File renamed" });
+    } catch (err) {
+      queryClient.setQueryData(filesKey, previousFiles ?? []);
+      toast({ title: getErrorMessage(err, "Error renaming file"), variant: "destructive" });
     } finally {
       queryClient.invalidateQueries({ queryKey: filesKey });
     }
@@ -907,7 +1066,74 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
                   {toMaterialIcon(f.path, f.type)}
                 </span>
               )}
-              <span className="truncate flex-1">{f.name}</span>
+
+              {renamingFilePath === f.path ? (
+                <>
+                  <Input
+                    className="h-6 text-xs"
+                    value={renameFileName}
+                    onChange={(e) => setRenameFileName(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") void handleRenameRootFile(f.path);
+                      if (e.key === "Escape") setRenamingFilePath(null);
+                    }}
+                    autoFocus
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleRenameRootFile(f.path);
+                    }}
+                  >
+                    <Check className="w-3 h-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRenamingFilePath(null);
+                    }}
+                  >
+                    <X className="w-3 h-3" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span className="truncate flex-1">{f.name}</span>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRenamingFilePath(f.path);
+                        setRenameFileName(f.path.split("/").pop() ?? f.name);
+                      }}
+                    >
+                      <Edit2 className="w-3 h-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 hover:bg-destructive hover:text-destructive-foreground"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleDeleteRootFile(f.path);
+                      }}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>
