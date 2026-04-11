@@ -26,6 +26,11 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: artifacts/artifacts/markpad/src-tauri -> target
+
       - name: Install workspace dependencies
         run: pnpm install --no-frozen-lockfile --force
 

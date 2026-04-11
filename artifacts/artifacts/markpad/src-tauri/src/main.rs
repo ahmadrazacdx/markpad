@@ -101,10 +101,13 @@ fn wait_for_backend_ready(port: u16, timeout: Duration) -> bool {
 
 fn stop_backend(app: &tauri::AppHandle) {
     let state = app.state::<BackendState>();
-    if let Ok(mut guard) = state.child.lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-        }
+    let mut guard = match state.child.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
     }
 }
 
@@ -126,9 +129,11 @@ fn main() {
                 }
 
                 let state = app.state::<BackendState>();
-                if let Ok(mut guard) = state.child.lock() {
-                    *guard = Some(child);
-                }
+                let mut guard = state
+                    .child
+                    .lock()
+                    .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Backend state lock poisoned"))?;
+                *guard = Some(child);
             }
 
             Ok(())
