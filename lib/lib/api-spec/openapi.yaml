@@ -1,0 +1,550 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: MarkPad API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: projects
+    description: Project management
+  - name: files
+    description: File operations
+  - name: history
+    description: Version history / snapshots
+  - name: export
+    description: Export operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List all projects
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: Create a new project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectBody"
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /projects/{projectId}:
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      summary: Delete a project
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+    patch:
+      operationId: updateProject
+      tags: [projects]
+      summary: Rename a project
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectBody"
+      responses:
+        "200":
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /projects/{projectId}/files:
+    get:
+      operationId: listFiles
+      tags: [files]
+      summary: List files in a project
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: File tree
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FileEntry"
+    post:
+      operationId: createFile
+      tags: [files]
+      summary: Create a new file in a project
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFileBody"
+      responses:
+        "201":
+          description: File created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileEntry"
+
+  /projects/{projectId}/files/{filePath}:
+    get:
+      operationId: getFileContent
+      tags: [files]
+      summary: Get file content
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/FilePath"
+      responses:
+        "200":
+          description: File content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileContent"
+    put:
+      operationId: saveFileContent
+      tags: [files]
+      summary: Save file content (triggers snapshot)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/FilePath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveFileBody"
+      responses:
+        "200":
+          description: File saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileContent"
+    delete:
+      operationId: deleteFile
+      tags: [files]
+      summary: Delete a file
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/FilePath"
+      responses:
+        "200":
+          description: File deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /projects/{projectId}/history:
+    get:
+      operationId: getHistory
+      tags: [history]
+      summary: Get version history for a file
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: file
+          in: query
+          required: true
+          schema:
+            type: string
+          description: File path to get history for
+      responses:
+        "200":
+          description: Grouped history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryResponse"
+
+  /projects/{projectId}/history/{snapshotId}/restore:
+    post:
+      operationId: restoreSnapshot
+      tags: [history]
+      summary: Restore a snapshot
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/SnapshotId"
+      responses:
+        "200":
+          description: Snapshot restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileContent"
+
+  /projects/{projectId}/history/{snapshotId}/pin:
+    post:
+      operationId: pinSnapshot
+      tags: [history]
+      summary: Pin a snapshot with a label
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/SnapshotId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinSnapshotBody"
+      responses:
+        "200":
+          description: Snapshot pinned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Snapshot"
+
+  /projects/{projectId}/export:
+    get:
+      operationId: exportProject
+      tags: [export]
+      summary: Export a project file
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [pdf, md, latex]
+          description: Export format
+        - name: file
+          in: query
+          required: false
+          schema:
+            type: string
+          description: File to export (defaults to main.md)
+      responses:
+        "200":
+          description: File download
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /projects/{projectId}/render:
+    post:
+      operationId: renderPreview
+      tags: [export]
+      summary: Render markdown to PDF
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderBody"
+      responses:
+        "200":
+          description: PDF bytes
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /projects/{projectId}/stats:
+    get:
+      operationId: getProjectStats
+      tags: [projects]
+      summary: Get project statistics
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectStats"
+
+  /templates:
+    get:
+      operationId: listTemplates
+      tags: [projects]
+      summary: List available templates
+      responses:
+        "200":
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Template"
+
+components:
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: integer
+    FilePath:
+      name: filePath
+      in: path
+      required: true
+      schema:
+        type: string
+    SnapshotId:
+      name: snapshotId
+      in: path
+      required: true
+      schema:
+        type: integer
+
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        template:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - name
+        - template
+        - createdAt
+        - updatedAt
+
+    CreateProjectBody:
+      type: object
+      properties:
+        name:
+          type: string
+        template:
+          type: string
+          enum: [plain, academic, report, letter]
+      required:
+        - name
+        - template
+
+    UpdateProjectBody:
+      type: object
+      properties:
+        name:
+          type: string
+      required:
+        - name
+
+    FileEntry:
+      type: object
+      properties:
+        path:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [file, directory]
+        size:
+          type: integer
+      required:
+        - path
+        - name
+        - type
+
+    FileContent:
+      type: object
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+        wordCount:
+          type: integer
+        lastSavedAt:
+          type: string
+      required:
+        - path
+        - content
+        - wordCount
+        - lastSavedAt
+
+    CreateFileBody:
+      type: object
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+      required:
+        - path
+
+    SaveFileBody:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content
+
+    Snapshot:
+      type: object
+      properties:
+        id:
+          type: integer
+        filePath:
+          type: string
+        wordCount:
+          type: integer
+        label:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required:
+        - id
+        - filePath
+        - wordCount
+        - createdAt
+
+    HistoryResponse:
+      type: object
+      properties:
+        pinned:
+          type: array
+          items:
+            $ref: "#/components/schemas/Snapshot"
+        today:
+          type: array
+          items:
+            $ref: "#/components/schemas/Snapshot"
+        yesterday:
+          type: array
+          items:
+            $ref: "#/components/schemas/Snapshot"
+        older:
+          type: array
+          items:
+            $ref: "#/components/schemas/Snapshot"
+      required:
+        - pinned
+        - today
+        - yesterday
+        - older
+
+    PinSnapshotBody:
+      type: object
+      properties:
+        label:
+          type: string
+      required:
+        - label
+
+    RenderBody:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+      required:
+        - success
+
+    ProjectStats:
+      type: object
+      properties:
+        totalFiles:
+          type: integer
+        totalWords:
+          type: integer
+        totalSnapshots:
+          type: integer
+        lastEditedAt:
+          type: string
+      required:
+        - totalFiles
+        - totalWords
+        - totalSnapshots
+        - lastEditedAt
+
+    Template:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        content:
+          type: string
+      required:
+        - id
+        - name
+        - description
+        - content

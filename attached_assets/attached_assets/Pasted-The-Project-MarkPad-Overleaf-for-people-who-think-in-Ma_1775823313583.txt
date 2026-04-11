@@ -1,0 +1,283 @@
+The Project: MarkPad
+"Overleaf for people who think in Markdown"
+---
+
+Build a local-first Markdown writing app called "MarkPad" — think Jupyter Notebook 
+but for writing beautiful PDFs. User installs with pip, runs `markpad` in terminal, 
+and a browser opens at localhost:8000.
+
+== TECH STACK ==
+- Backend: Python, FastAPI, Uvicorn, WebSockets, GitPython, watchfiles
+- Frontend: Vanilla JS + HTML served by FastAPI (no separate build step)
+  - Left pane: CodeMirror 6 editor (markdown mode)
+  - Right pane: PDF.js to render PDF preview
+- PDF engine: Typst binary (bundle it or auto-download on first run via typst-py)
+- Version control: GitPython wrapping a local .git repo per project
+
+== PROJECT STRUCTURE ==
+markpad/
+├── markpad/
+│   ├── __init__.py
+│   ├── cli.py              # `markpad` entrypoint — starts uvicorn + opens browser
+│   ├── server.py           # FastAPI app
+│   ├── renderer.py         # Typst subprocess runner
+│   ├── vcs.py              # GitPython wrapper (init repo, auto-commit, list history)
+│   ├── projects.py         # Project CRUD (create, list, open, rename, delete)
+│   └── static/
+│       ├── index.html      # Full SPA — CodeMirror + PDF.js side by side
+│       ├── app.js          # WebSocket client, CodeMirror setup, PDF.js render loop
+│       └── style.css       # Split-pane layout, dark/light mode
+├── pyproject.toml
+└── README.md
+
+== FILE SYSTEM LAYOUT (user's machine) ==
+~/markpad/
+  <project-name>/
+    main.md          (default file)
+    assets/          (images, biblio files)
+    .git/            (auto-inited by markpad on project creation)
+    .markpad.json    (project metadata: name, created_at, default template)
+
+== KEY FEATURES TO BUILD ==
+
+1. LIVE PREVIEW (most important)
+   - CodeMirror sends markdown over WebSocket on every keystroke, debounced 300ms
+   - Backend writes md to a temp file, runs: typst compile --input content.md output.pdf
+     OR: pandoc content.md --pdf-engine=typst -o output.pdf
+     (use typst directly for speed — Typst's own markdown-like syntax or use pandoc 
+      as the md→typst bridge)
+   - Actually: write md to temp .md file, call:
+     `pandoc <file.md> --pdf-engine=typst -o <out.pdf>`
+     because Typst alone doesn't read markdown, Pandoc bridges it
+   - Send PDF bytes back over the same WebSocket connection
+   - Frontend feeds PDF bytes to PDF.js: pdfjsLib.getDocument({data: pdfBytes})
+   - Target: <500ms from keystroke to preview update
+
+2. PROJECT MANAGEMENT (sidebar)
+   - Left sidebar: list of projects (folders in ~/markpad/)
+   - Create new project: creates folder, inits git repo, creates main.md with YAML 
+     frontmatter template
+   - File tree inside each project (support multiple .md files + assets/)
+   - Click file → loads it in the editor
+
+3. VERSION CONTROL
+   - Every time user hits Cmd/Ctrl+S: auto git commit with message "Save YYYY-MM-DD HH:MM:SS"
+   - Also: auto-save + commit every 5 minutes if there are unsaved changes
+   - History panel: list commits (gitpython repo.iter_commits()), click to diff or restore
+   - Restore: git checkout <hash> -- <file>
+   - Expose via REST: GET /api/projects/{id}/history, POST /api/projects/{id}/restore
+
+4. EXPORT
+   - REST endpoint: GET /api/projects/{id}/export?format=pdf|md|latex|txt
+   - PDF: run pandoc+typst, return file download
+   - LaTeX: pandoc --to=latex
+   - Plain md: just serve the .md file
+   - Button in toolbar: Export PDF (primary), dropdown for other formats
+
+5. TEMPLATES
+   - On new project: choose template (Academic Paper, Report, Letter, Plain)
+   - Templates are .md files with YAML frontmatter (title, author, date) and 
+     typst template variable set
+   - Store templates in markpad/templates/ folder
+
+6. CLI ENTRYPOINT (cli.py)
+   import uvicorn, webbrowser, threading, time
+   def main():
+       threading.Timer(1.2, lambda: webbrowser.open("http://localhost:8000")).start()
+       uvicorn.run("markpad.server:app", host="127.0.0.1", port=8000)
+
+== API ROUTES ==
+GET  /                          → serve index.html
+WS   /ws/preview                → receive md text, return pdf bytes
+GET  /api/projects              → list all projects
+POST /api/projects              → create project {name, template}
+GET  /api/projects/{id}/files   → file tree
+GET  /api/projects/{id}/files/{path}  → file content
+PUT  /api/projects/{id}/files/{path}  → save file content (triggers git commit)
+GET  /api/projects/{id}/history → git log
+POST /api/projects/{id}/restore → restore to commit
+GET  /api/projects/{id}/export  → download file (?format=pdf|md|latex)
+DELETE /api/projects/{id}       → delete project
+
+== RENDERER (renderer.py) ==
+import subprocess, tempfile, asyncio, hashlib
+
+async def render_to_pdf(markdown_text: str, project_path: str) -> bytes:
+    # Write md to temp file
+    # Run: pandoc <tmpfile.md> --pdf-engine=typst -o <tmpout.pdf> --standalone
+    # Add project assets dir to pandoc resource-path
+    # Return PDF bytes
+    # Cache last render hash — skip re-render if content unchanged
+    pass
+
+== FRONTEND (index.html + app.js) ==
+Layout:
+  - Top bar: project name, save button, export dropdown, history button
+  - Body: flex row
+    - Left (30%): project sidebar (project list + file tree)  
+    - Center (35%): CodeMirror 6 markdown editor
+    - Right (35%): PDF.js iframe/canvas preview
+  - Bottom status bar: "Rendering..." / "Ready" / "Saved at 14:32"
+
+WebSocket flow in app.js:
+  const ws = new WebSocket("ws://localhost:8000/ws/preview")
+  let debounceTimer
+  editor.on("change", () => {
+    clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(() => {
+      ws.send(JSON.stringify({content: editor.getValue(), project: currentProject}))
+    }, 300)
+  })
+  ws.onmessage = (event) => {
+    // event.data is ArrayBuffer of PDF bytes
+    const pdfData = new Uint8Array(event.data)
+    pdfjsLib.getDocument({data: pdfData}).promise.then(pdf => renderPDF(pdf))
+  }
+
+PDF.js render: render all pages into stacked canvas elements (not iframe) 
+so it scales nicely and doesn't have cross-origin issues.
+
+== INSTALLATION ==
+pyproject.toml:
+  [project.scripts]
+  markpad = "markpad.cli:main"
+  
+  dependencies: fastapi, uvicorn[standard], python-multipart, gitpython, 
+                watchfiles, aiofiles, pandoc (optional — document in README 
+                that user needs pandoc + typst installed, or auto-download typst)
+
+Auto-download typst: on startup, check if `typst` is in PATH. If not, download 
+the right binary for the OS (use typst GitHub releases API) to ~/.markpad/bin/typst
+and add to PATH for the session. Do the same for pandoc if missing.
+This makes it fully self-contained like Jupyter.
+
+== VERSION CONTROL (no Git — SQLite timeline, invisible to user) ==
+
+Philosophy: the user never sees a "commit", "repo", or hash. They see 
+"Today 4:47 PM — 2,104 words" with a Restore button. That's it.
+
+Storage: each project gets .markpad/history.db (SQLite, Python stdlib sqlite3)
+
+Schema:
+  CREATE TABLE snapshots (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path TEXT NOT NULL,
+    content   TEXT NOT NULL,
+    word_count INTEGER,
+    label     TEXT,           -- NULL unless user pinned this version
+    created_at TEXT NOT NULL  -- ISO8601 timestamp
+  );
+
+Snapshot triggers (all silent, no user action required):
+  1. Every Ctrl+S / Cmd+S
+  2. Every 2 minutes IF content has changed since last snapshot
+  3. When user clicks "Pin this version" and types a name
+
+Pruning (keep it lean automatically):
+  - Keep ALL pinned versions forever
+  - Keep ALL snapshots from the last 7 days
+  - For older snapshots: keep only one per day (the last one of that day)
+  - Hard cap: 500 total snapshots per file (prune oldest unpinned first)
+
+REST API:
+  GET  /api/projects/{id}/history?file=main.md
+       → returns [{id, created_at, word_count, label}, ...]
+       → grouped by day in response: {today: [...], yesterday: [...], older: [...]}
+  
+  POST /api/projects/{id}/history/{snapshot_id}/restore
+       → writes snapshot content back to the file
+       → BEFORE restoring, saves current state as a new snapshot 
+         labeled "Before restore — {timestamp}" so user can undo the undo
+  
+  POST /api/projects/{id}/history/{snapshot_id}/pin
+       → body: {label: "Submitted draft"}
+       → sets label on that snapshot
+  
+  GET  /api/projects/{id}/history/{snapshot_id}/download?format=md|pdf
+       → lets user download any historical version as a file
+
+== VCS module (vcs.py) — pure Python, zero dependencies ==
+
+import sqlite3, datetime, re
+from pathlib import Path
+
+DB_PATH = ".markpad/history.db"
+
+def init_db(project_path):
+    db = sqlite3.connect(project_path / DB_PATH)
+    db.execute("""CREATE TABLE IF NOT EXISTS snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL,
+        content TEXT NOT NULL,
+        word_count INTEGER,
+        label TEXT,
+        created_at TEXT NOT NULL
+    )""")
+    db.commit()
+    return db
+
+def save_snapshot(project_path, file_path, content, label=None):
+    db = sqlite3.connect(project_path / DB_PATH)
+    word_count = len(re.findall(r'\w+', content))
+    now = datetime.datetime.now().isoformat()
+    db.execute(
+        "INSERT INTO snapshots (file_path, content, word_count, label, created_at) VALUES (?,?,?,?,?)",
+        (str(file_path), content, word_count, label, now)
+    )
+    db.commit()
+    _prune(db, str(file_path))
+
+def get_history(project_path, file_path):
+    db = sqlite3.connect(project_path / DB_PATH)
+    rows = db.execute(
+        "SELECT id, created_at, word_count, label FROM snapshots WHERE file_path=? ORDER BY created_at DESC",
+        (str(file_path),)
+    ).fetchall()
+    # Group by day
+    today = datetime.date.today().isoformat()
+    yesterday = (datetime.date.today() - datetime.timedelta(1)).isoformat()
+    groups = {"pinned": [], "today": [], "yesterday": [], "older": []}
+    for row in rows:
+        d = {"id": row[0], "created_at": row[1], "word_count": row[2], "label": row[3]}
+        if row[3]:  groups["pinned"].append(d)
+        elif row[1].startswith(today):  groups["today"].append(d)
+        elif row[1].startswith(yesterday):  groups["yesterday"].append(d)
+        else:  groups["older"].append(d)
+    return groups
+
+def restore_snapshot(project_path, file_path, snapshot_id):
+    db = sqlite3.connect(project_path / DB_PATH)
+    # Save current state first so user can undo
+    current = Path(project_path / file_path).read_text()
+    save_snapshot(project_path, file_path, current, 
+                  label=f"Before restore — {datetime.datetime.now().strftime('%b %d %H:%M')}")
+    # Restore
+    content = db.execute("SELECT content FROM snapshots WHERE id=?", (snapshot_id,)).fetchone()[0]
+    Path(project_path / file_path).write_text(content)
+    return content
+
+def _prune(db, file_path):
+    # Keep all pinned, all from last 7 days, one-per-day for older, cap at 500
+    seven_days_ago = (datetime.date.today() - datetime.timedelta(7)).isoformat()
+    db.execute("""DELETE FROM snapshots WHERE id IN (
+        SELECT id FROM snapshots 
+        WHERE file_path=? AND label IS NULL AND created_at < ?
+        AND id NOT IN (
+            SELECT MAX(id) FROM snapshots 
+            WHERE file_path=? AND created_at < ?
+            GROUP BY DATE(created_at)
+        )
+    )""", (file_path, seven_days_ago, file_path, seven_days_ago))
+    db.commit()
+
+== STRETCH GOALS (do these only after core works) ==
+- Word count + reading time in status bar
+- Find & replace (CodeMirror built-in)
+- Custom Typst templates (upload .typ file per project)
+- Math preview indicator (detect $...$ in md, show MathJax hint)
+- Drag-and-drop image upload → copies to assets/, inserts ![](assets/img.png)
+- Dark/light mode toggle (CodeMirror theme + CSS vars)
+
+== WHAT MAKES THIS VIRAL ==
+- Single command: pip install markpad && markpad
+- Feels like Overleaf but runs on your machine
