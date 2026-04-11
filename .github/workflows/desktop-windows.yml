@@ -1,0 +1,171 @@
+name: Desktop Windows Build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install workspace dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Typecheck workspace
+        run: pnpm run typecheck
+
+      - name: Build API server bundle
+        run: pnpm --filter @workspace/api-server run build
+
+      - name: Build desktop frontend bundle
+        run: pnpm --filter @workspace/markpad run build:desktop:web
+
+      - name: Stage desktop backend resources
+        run: pnpm --filter @workspace/markpad run prepare:desktop:resources
+
+      - name: Download and stage runtime binaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $resourceRoot = "artifacts/artifacts/markpad/src-tauri/resources"
+          New-Item -ItemType Directory -Force -Path "$resourceRoot/runtime" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$resourceRoot/bin" | Out-Null
+
+          $nodePath = (Get-Command node).Source
+          $nodeDir = Split-Path $nodePath -Parent
+          Copy-Item $nodeDir "$resourceRoot/runtime/node" -Recurse -Force
+
+          $pandocZip = "$env:RUNNER_TEMP/pandoc.zip"
+          Invoke-WebRequest "https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-windows-x86_64.zip" -OutFile $pandocZip
+          Expand-Archive -Path $pandocZip -DestinationPath "$env:RUNNER_TEMP/pandoc" -Force
+          $pandocExe = Get-ChildItem "$env:RUNNER_TEMP/pandoc" -Recurse -Filter pandoc.exe | Select-Object -First 1
+          if (-not $pandocExe) { throw "pandoc.exe not found in archive" }
+          Copy-Item $pandocExe.FullName "$resourceRoot/bin/pandoc.exe" -Force
+
+          $typstZip = "$env:RUNNER_TEMP/typst.zip"
+          Invoke-WebRequest "https://github.com/typst/typst/releases/download/v0.13.1/typst-x86_64-pc-windows-msvc.zip" -OutFile $typstZip
+          Expand-Archive -Path $typstZip -DestinationPath "$env:RUNNER_TEMP/typst" -Force
+          $typstExe = Get-ChildItem "$env:RUNNER_TEMP/typst" -Recurse -Filter typst.exe | Select-Object -First 1
+          if (-not $typstExe) { throw "typst.exe not found in archive" }
+          Copy-Item $typstExe.FullName "$resourceRoot/bin/typst.exe" -Force
+
+      - name: Smoke test backend health + WebSocket preview
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $resourceRoot = "artifacts/artifacts/markpad/src-tauri/resources"
+          $nodeExe = Join-Path $resourceRoot "runtime/node/node.exe"
+          $backendEntry = "artifacts/artifacts/markpad/src-tauri/resources/backend/dist/index.mjs"
+          $dataDir = Join-Path $env:RUNNER_TEMP "markpad-data"
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+
+          $server = $null
+          try {
+            $envMap = @{
+              PORT = "18080"
+              NODE_ENV = "production"
+              MARKPAD_DATA_DIR = $dataDir
+              PATH = "$resourceRoot/bin;$resourceRoot/runtime/node;$env:PATH"
+            }
+
+            $server = Start-Process -FilePath $nodeExe -ArgumentList $backendEntry -WorkingDirectory $env:GITHUB_WORKSPACE -Environment $envMap -PassThru
+
+            $deadline = (Get-Date).AddSeconds(45)
+            $healthy = $false
+            while ((Get-Date) -lt $deadline) {
+              try {
+                $resp = Invoke-RestMethod "http://127.0.0.1:18080/api/healthz"
+                if ($resp.status -eq "ok") {
+                  $healthy = $true
+                  break
+                }
+              } catch {
+              }
+              Start-Sleep -Milliseconds 400
+            }
+
+            if (-not $healthy) {
+              throw "Backend did not become healthy in time"
+            }
+
+            $wsScript = @"
+const timeout = setTimeout(() => {
+  console.error('preview websocket timed out');
+  process.exit(1);
+}, 20000);
+
+const ws = new WebSocket('ws://127.0.0.1:18080/api/ws/preview');
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    projectId: 1,
+    content: '# CI smoke test\n\nWebSocket preview should return a PDF.',
+    options: {
+      pageSize: 'a4',
+      documentFont: 'latin-modern',
+      fontSizePt: 11,
+      lineStretch: 1.1,
+    },
+  }));
+};
+
+ws.onmessage = async (event) => {
+  if (event.data instanceof Blob) {
+    const buf = Buffer.from(await event.data.arrayBuffer());
+    if (buf.length < 100) {
+      console.error('preview pdf payload too small');
+      process.exit(1);
+    }
+    clearTimeout(timeout);
+    ws.close();
+    process.exit(0);
+  }
+
+  console.error('unexpected preview response', String(event.data));
+  process.exit(1);
+};
+
+ws.onerror = () => {
+  console.error('preview websocket error');
+  process.exit(1);
+};
+"@
+
+            & $nodeExe -e $wsScript
+          } finally {
+            if ($server -and -not $server.HasExited) {
+              Stop-Process -Id $server.Id -Force
+            }
+          }
+
+      - name: Build NSIS installer (.exe)
+        run: pnpm --filter @workspace/markpad run tauri:build:windows
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: markpad-windows-installer-${{ github.sha }}
+          path: |
+            artifacts/artifacts/markpad/src-tauri/target/release/bundle/nsis/*.exe
+            artifacts/artifacts/markpad/src-tauri/target/release/bundle/nsis/*.zip
+          if-no-files-found: error

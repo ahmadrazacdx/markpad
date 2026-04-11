@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MarkPad",
+  "version": "0.1.0",
+  "identifier": "com.markpad.desktop",
+  "build": {
+    "beforeBuildCommand": "pnpm run build:desktop:web",
+    "beforeDevCommand": "pnpm run dev",
+    "devUrl": "http://localhost:19551",
+    "frontendDist": "../dist/public"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "MarkPad",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "resources": ["resources/backend/**", "resources/runtime/**", "resources/bin/**"]
+  }
+}

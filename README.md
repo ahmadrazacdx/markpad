@@ -11,7 +11,7 @@ MarkPad is a local-first Markdown writing app — "Overleaf for people who think
 - **Package manager**: pnpm
 - **TypeScript version**: 5.9
 - **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
+- **Database**: SQLite (local file via libSQL client) + Drizzle ORM
 - **Validation**: Zod (`zod/v4`), `drizzle-zod`
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (CJS bundle)
@@ -65,5 +65,22 @@ MarkPad is a local-first Markdown writing app — "Overleaf for people who think
 
 - **pandoc** (v3.6) — Markdown to PDF/LaTeX conversion
 - **typst** (v0.13.1) — PDF typesetting engine used by pandoc
+
+## Desktop Build (Windows First)
+
+- **Desktop shell**: Tauri 2 (native WebView, lightweight)
+- **Installer target**: NSIS `.exe`
+- **Workflow**: `.github/workflows/desktop-windows.yml`
+
+The Windows CI workflow runs on every push and produces downloadable installer artifacts in GitHub Actions.
+
+Local desktop build steps:
+
+1. `pnpm --filter @workspace/api-server run build`
+2. `pnpm --filter @workspace/markpad run build:desktop:web`
+3. Place a full Node runtime folder (including `node.exe` and its DLLs) into `artifacts/artifacts/markpad/src-tauri/resources/runtime/node/`
+4. Place `pandoc.exe` and `typst.exe` into `artifacts/artifacts/markpad/src-tauri/resources/bin/`
+5. `pnpm --filter @workspace/markpad run prepare:desktop:resources`
+6. `pnpm --filter @workspace/markpad run tauri:build:windows`
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.

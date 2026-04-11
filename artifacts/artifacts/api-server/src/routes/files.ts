@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { filesTable, snapshotsTable } from "@workspace/db";
-import { eq, and, sql, desc } from "drizzle-orm";
+import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import {
   ListFilesParams,
   CreateFileParams,
@@ -41,7 +41,7 @@ router.get("/projects/:projectId/files", async (req, res) => {
       .select({
         path: filesTable.path,
         name: filesTable.name,
-        size: sql<number>`char_length(${filesTable.content})`,
+        size: sql<number>`length(${filesTable.content})`,
       })
       .from(filesTable)
       .where(eq(filesTable.projectId, projectId));
@@ -439,25 +439,12 @@ router.post("/projects/:projectId/assets/upload", async (req, res) => {
 async function pruneSnapshots(projectId: number, filePath: string) {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  await db.execute(sql`
-    DELETE FROM snapshots WHERE id IN (
-      SELECT id FROM snapshots
-      WHERE project_id = ${projectId}
-        AND file_path = ${filePath}
-        AND label IS NULL
-        AND created_at < ${sevenDaysAgo}
-        AND id NOT IN (
-          SELECT MAX(id) FROM snapshots
-          WHERE project_id = ${projectId}
-            AND file_path = ${filePath}
-            AND created_at < ${sevenDaysAgo}
-          GROUP BY DATE(created_at)
-        )
-    )
-  `);
-
   const allSnapshots = await db
-    .select({ id: snapshotsTable.id, label: snapshotsTable.label })
+    .select({
+      id: snapshotsTable.id,
+      label: snapshotsTable.label,
+      createdAt: snapshotsTable.createdAt,
+    })
     .from(snapshotsTable)
     .where(
       and(
@@ -467,17 +454,44 @@ async function pruneSnapshots(projectId: number, filePath: string) {
     )
     .orderBy(desc(snapshotsTable.createdAt));
 
-  if (allSnapshots.length > 500) {
-    const toDelete = allSnapshots
-      .slice(500)
-      .filter((s) => !s.label)
-      .map((s) => s.id);
+  const keepByRule = new Set<number>();
+  const olderDayKept = new Set<string>();
 
-    if (toDelete.length > 0) {
-      await db.execute(
-        sql`DELETE FROM snapshots WHERE id = ANY(${toDelete})`
-      );
+  for (const snapshot of allSnapshots) {
+    if (snapshot.label) {
+      keepByRule.add(snapshot.id);
+      continue;
     }
+
+    if (snapshot.createdAt >= sevenDaysAgo) {
+      keepByRule.add(snapshot.id);
+      continue;
+    }
+
+    const dayKey = snapshot.createdAt.toISOString().slice(0, 10);
+    if (!olderDayKept.has(dayKey)) {
+      olderDayKept.add(dayKey);
+      keepByRule.add(snapshot.id);
+    }
+  }
+
+  const pinnedIds = allSnapshots.filter((s) => Boolean(s.label)).map((s) => s.id);
+  const candidateUnpinnedIds = allSnapshots
+    .filter((s) => !s.label && keepByRule.has(s.id))
+    .map((s) => s.id);
+
+  const nonPinnedAllowance = Math.max(0, 500 - pinnedIds.length);
+  const keptUnpinnedIds = candidateUnpinnedIds.slice(0, nonPinnedAllowance);
+
+  const finalKeep = new Set<number>([...pinnedIds, ...keptUnpinnedIds]);
+  const toDelete = allSnapshots
+    .filter((snapshot) => !finalKeep.has(snapshot.id))
+    .map((snapshot) => snapshot.id);
+
+  if (toDelete.length > 0) {
+    await db
+      .delete(snapshotsTable)
+      .where(inArray(snapshotsTable.id, toDelete));
   }
 }
 
