@@ -3,9 +3,40 @@ import { db } from "@workspace/db";
 import { filesTable, snapshotsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { ExportProjectParams, ExportProjectQueryParams, RenderPreviewParams, RenderPreviewBody } from "@workspace/api-zod";
-import { renderMarkdownToPdf, renderMarkdownToLatex } from "../lib/renderer";
+import { renderMarkdownToPdf, renderMarkdownToLatex, RenderOptions } from "../lib/renderer";
+import { handleRouteError } from "../lib/http";
 
 const router = Router();
+
+function parseRenderOptions(input: unknown): RenderOptions {
+  if (!input || typeof input !== "object") return {};
+  const raw = input as { pageSize?: unknown; documentFont?: unknown; fontSizePt?: unknown; lineStretch?: unknown };
+
+  const pageSize =
+    raw.pageSize === "a4" || raw.pageSize === "letter" || raw.pageSize === "legal" || raw.pageSize === "a5"
+      ? raw.pageSize
+      : undefined;
+  const documentFont =
+    raw.documentFont === "latin-modern" ||
+    raw.documentFont === "times-new-roman" ||
+    raw.documentFont === "palatino" ||
+    raw.documentFont === "helvetica" ||
+    raw.documentFont === "computer-modern"
+      ? raw.documentFont
+      : undefined;
+
+  const fontSizePt =
+    typeof raw.fontSizePt === "number" && Number.isFinite(raw.fontSizePt)
+      ? Math.min(16, Math.max(9, raw.fontSizePt))
+      : undefined;
+
+  const lineStretch =
+    typeof raw.lineStretch === "number" && Number.isFinite(raw.lineStretch)
+      ? Math.min(1.6, Math.max(1, raw.lineStretch))
+      : undefined;
+
+  return { pageSize, documentFont, fontSizePt, lineStretch };
+}
 
 router.get("/projects/:projectId/export", async (req, res) => {
   try {
@@ -50,20 +81,43 @@ router.get("/projects/:projectId/export", async (req, res) => {
 
     res.status(400).json({ error: "Invalid format" });
   } catch (err) {
-    req.log.error({ err }, "Failed to export");
-    res.status(500).json({ error: "Failed to export" });
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to export",
+      publicMessage: "Failed to export",
+    });
   }
 });
 
 router.post("/projects/:projectId/render", async (req, res) => {
   try {
+    RenderPreviewParams.parse(req.params);
     const { content } = RenderPreviewBody.parse(req.body);
-    const pdfBytes = await renderMarkdownToPdf(content);
+    const options = parseRenderOptions((req.body as { options?: unknown })?.options);
+    const pdfBytes = await renderMarkdownToPdf(content, options);
     res.setHeader("Content-Type", "application/pdf");
     res.send(Buffer.from(pdfBytes));
   } catch (err) {
-    req.log.error({ err }, "Failed to render preview");
-    res.status(500).json({ error: "Failed to render" });
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to render preview",
+      publicMessage: "Failed to render",
+    });
+  }
+});
+
+router.post("/projects/:projectId/export/latex", async (req, res) => {
+  try {
+    RenderPreviewParams.parse(req.params);
+    const { content } = RenderPreviewBody.parse(req.body);
+    const options = parseRenderOptions((req.body as { options?: unknown })?.options);
+    const latex = await renderMarkdownToLatex(content, options);
+    res.setHeader("Content-Type", "application/x-latex");
+    res.setHeader("Content-Disposition", "attachment; filename=markpad.tex");
+    res.send(latex);
+  } catch (err) {
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to export latex from current content",
+      publicMessage: "Failed to export latex",
+    });
   }
 });
 

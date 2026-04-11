@@ -3,6 +3,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import "pdfjs-dist/build/pdf.worker.mjs";
 import { Loader2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AppPreferences } from "@/lib/preferences";
 
 // Set worker src
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -14,19 +15,63 @@ interface PDFPreviewProps {
   projectId: number | null;
   selectedFile: string | null;
   content: string;
+  preferences: AppPreferences;
   onStatusChange: (status: "Rendering..." | "Ready" | "Error") => void;
 }
 
-export function PDFPreview({ projectId, selectedFile, content, onStatusChange }: PDFPreviewProps) {
+export function PDFPreview({ projectId, selectedFile, content, preferences, onStatusChange }: PDFPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const latestPayloadRef = useRef<{ projectId: number | null; content: string }>({ projectId, content });
+  const latestPayloadRef = useRef<{
+    projectId: number | null;
+    content: string;
+    options: { pageSize: string; documentFont: string; fontSizePt: number; lineStretch: number };
+  }>({
+    projectId,
+    content,
+    options: {
+      pageSize: preferences.pageSize,
+      documentFont: preferences.documentFont,
+      fontSizePt: preferences.renderFontSizePt,
+      lineStretch: preferences.renderLineStretch,
+    },
+  });
+  const lastSentPayloadRef = useRef<string>("");
+  const lastRenderedPdfSignatureRef = useRef<string>("");
+  const renderVersionRef = useRef(0);
+  const activeLoadingTaskRef = useRef<any>(null);
+  const activePageTasksRef = useRef<any[]>([]);
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    latestPayloadRef.current = { projectId, content };
-  }, [projectId, content]);
+    latestPayloadRef.current = {
+      projectId,
+      content,
+      options: {
+        pageSize: preferences.pageSize,
+        documentFont: preferences.documentFont,
+        fontSizePt: preferences.renderFontSizePt,
+        lineStretch: preferences.renderLineStretch,
+      },
+    };
+  }, [
+    projectId,
+    content,
+    preferences.pageSize,
+    preferences.documentFont,
+    preferences.renderFontSizePt,
+    preferences.renderLineStretch,
+  ]);
+
+  const payloadKey = (
+    pid: number | null,
+    text: string,
+    pageSize: string,
+    documentFont: string,
+    fontSizePt: number,
+    lineStretch: number,
+  ) => `${pid ?? "none"}:${pageSize}:${documentFont}:${fontSizePt}:${lineStretch}:${text}`;
 
   useEffect(() => {
     if (!projectId || !selectedFile) {
@@ -52,8 +97,23 @@ export function PDFPreview({ projectId, selectedFile, content, onStatusChange }:
       setError(null);
       const payload = latestPayloadRef.current;
       if (payload.projectId && selectedFile) {
-        onStatusChange("Rendering...");
-        ws.send(JSON.stringify({ projectId: payload.projectId, content: payload.content }));
+        const key = payloadKey(
+          payload.projectId,
+          payload.content,
+          payload.options.pageSize,
+          payload.options.documentFont,
+          payload.options.fontSizePt,
+          payload.options.lineStretch,
+        );
+        if (key !== lastSentPayloadRef.current) {
+          lastSentPayloadRef.current = key;
+          onStatusChange("Rendering...");
+          ws.send(JSON.stringify({
+            projectId: payload.projectId,
+            content: payload.content,
+            options: payload.options,
+          }));
+        }
       }
     };
 
@@ -100,30 +160,77 @@ export function PDFPreview({ projectId, selectedFile, content, onStatusChange }:
   useEffect(() => {
     if (!projectId || !selectedFile || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
+    const key = payloadKey(
+      projectId,
+      content,
+      preferences.pageSize,
+      preferences.documentFont,
+      preferences.renderFontSizePt,
+      preferences.renderLineStretch,
+    );
+    if (key === lastSentPayloadRef.current) return;
+
     onStatusChange("Rendering...");
     setError(null);
     const timeout = setTimeout(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ projectId, content }));
+        lastSentPayloadRef.current = key;
+        wsRef.current.send(JSON.stringify({
+          projectId,
+          content,
+          options: {
+            pageSize: preferences.pageSize,
+            documentFont: preferences.documentFont,
+            fontSizePt: preferences.renderFontSizePt,
+            lineStretch: preferences.renderLineStretch,
+          },
+        }));
       }
-    }, 300);
+    }, 180);
 
     return () => clearTimeout(timeout);
-  }, [content, projectId, selectedFile, onStatusChange]);
+  }, [
+    content,
+    projectId,
+    selectedFile,
+    onStatusChange,
+    preferences.pageSize,
+    preferences.documentFont,
+    preferences.renderFontSizePt,
+    preferences.renderLineStretch,
+  ]);
 
   // Render PDF
   useEffect(() => {
     if (!pdfData || !containerRef.current) return;
 
+    const signature = `${pdfData.length}:${pdfData[0] ?? 0}:${pdfData[1] ?? 0}:${pdfData[pdfData.length - 1] ?? 0}`;
+    if (signature === lastRenderedPdfSignatureRef.current) {
+      onStatusChange("Ready");
+      return;
+    }
+    lastRenderedPdfSignatureRef.current = signature;
+
     let isMounted = true;
     const container = containerRef.current;
+    const currentVersion = ++renderVersionRef.current;
+
+    if (activeLoadingTaskRef.current) {
+      activeLoadingTaskRef.current.destroy?.();
+      activeLoadingTaskRef.current = null;
+    }
+    for (const task of activePageTasksRef.current) {
+      task?.cancel?.();
+    }
+    activePageTasksRef.current = [];
 
     const renderPdf = async () => {
       try {
         const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+        activeLoadingTaskRef.current = loadingTask;
         const pdf = await loadingTask.promise;
         
-        if (!isMounted) return;
+        if (!isMounted || currentVersion !== renderVersionRef.current) return;
 
         // Clear existing canvas elements safely
         while (container.firstChild) {
@@ -132,28 +239,39 @@ export function PDFPreview({ projectId, selectedFile, content, onStatusChange }:
 
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
           const page = await pdf.getPage(pageNum);
-          if (!isMounted) return;
+          if (!isMounted || currentVersion !== renderVersionRef.current) return;
 
-          const viewport = page.getViewport({ scale: 1.5 });
+          const viewport = page.getViewport({ scale: 1.1 });
+          const outputScale = Math.min(window.devicePixelRatio || 1, 1.5);
           const canvas = document.createElement("canvas");
           const context = canvas.getContext("2d");
 
           if (!context) continue;
 
-          canvas.height = viewport.height;
-          canvas.width = viewport.width;
+          canvas.height = Math.floor(viewport.height * outputScale);
+          canvas.width = Math.floor(viewport.width * outputScale);
+          canvas.style.width = `${Math.floor(viewport.width)}px`;
+          canvas.style.height = `${Math.floor(viewport.height)}px`;
           canvas.className = "mb-4 shadow-md max-w-full bg-white";
 
-          container.appendChild(canvas);
+          context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
 
-          await page.render({
+          const pageTask = page.render({
             canvasContext: context,
             viewport: viewport,
-          }).promise;
+          });
+          activePageTasksRef.current.push(pageTask);
+          await pageTask.promise;
+
+          if (!isMounted || currentVersion !== renderVersionRef.current) return;
+          container.appendChild(canvas);
         }
       } catch (err) {
-        console.error("Error rendering PDF:", err);
-        if (isMounted) setError("Failed to render PDF");
+        const cancelled = (err as { name?: string })?.name === "RenderingCancelledException";
+        if (!cancelled) {
+          console.error("Error rendering PDF:", err);
+          if (isMounted) setError("Failed to render PDF");
+        }
       }
     };
 
@@ -161,6 +279,14 @@ export function PDFPreview({ projectId, selectedFile, content, onStatusChange }:
 
     return () => {
       isMounted = false;
+      if (activeLoadingTaskRef.current) {
+        activeLoadingTaskRef.current.destroy?.();
+        activeLoadingTaskRef.current = null;
+      }
+      for (const task of activePageTasksRef.current) {
+        task?.cancel?.();
+      }
+      activePageTasksRef.current = [];
     };
   }, [pdfData]);
 

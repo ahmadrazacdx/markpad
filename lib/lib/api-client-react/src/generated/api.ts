@@ -45,6 +45,8 @@ type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
+const encodePathParam = (value: string) => encodeURIComponent(value);
+
 /**
  * Returns server health status
  * @summary Health check
@@ -629,7 +631,7 @@ export const useCreateFile = <
  * @summary Get file content
  */
 export const getGetFileContentUrl = (projectId: number, filePath: string) => {
-  return `/api/projects/${projectId}/files/${filePath}`;
+  return `/api/projects/${projectId}/files/${encodePathParam(filePath)}`;
 };
 
 export const getFileContent = async (
@@ -727,7 +729,7 @@ export function useGetFileContent<
  * @summary Save file content (triggers snapshot)
  */
 export const getSaveFileContentUrl = (projectId: number, filePath: string) => {
-  return `/api/projects/${projectId}/files/${filePath}`;
+  return `/api/projects/${projectId}/files/${encodePathParam(filePath)}`;
 };
 
 export const saveFileContent = async (
@@ -815,7 +817,7 @@ export const useSaveFileContent = <
  * @summary Delete a file
  */
 export const getDeleteFileUrl = (projectId: number, filePath: string) => {
-  return `/api/projects/${projectId}/files/${filePath}`;
+  return `/api/projects/${projectId}/files/${encodePathParam(filePath)}`;
 };
 
 export const deleteFile = async (

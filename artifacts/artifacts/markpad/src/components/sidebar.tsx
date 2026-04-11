@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Folder, File, Plus, Trash2, Edit2, Check, X, FileText, Settings, Archive } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Trash2, Edit2, Check, X, ChevronDown, Upload, ArrowLeft, PanelLeftClose, Settings2 } from "lucide-react";
 import { useListProjects, useCreateProject, useDeleteProject, useUpdateProject, useListFiles, useCreateFile, useDeleteFile, useListTemplates, getListProjectsQueryKey, getListFilesQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -8,15 +8,101 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AppPreferences,
+  DOCUMENT_FONT_OPTIONS,
+  EDITOR_FONT_OPTIONS,
+  PAGE_SIZE_OPTIONS,
+} from "@/lib/preferences";
 
 interface SidebarProps {
+  onToggleCollapse: () => void;
   projectId: number | null;
+  preferences: AppPreferences;
+  onPreferencesChange: (next: AppPreferences) => void;
   onProjectSelect: (id: number | null) => void;
   selectedFile: string | null;
   onFileSelect: (path: string) => void;
 }
 
-export function Sidebar({ projectId, onProjectSelect, selectedFile, onFileSelect }: SidebarProps) {
+type FileEntry = {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+  size?: number;
+};
+
+function normalizeAssetPath(path: string) {
+  const trimmed = path.trim().replace(/^\/+/, "");
+  return trimmed.startsWith("assets/") ? trimmed : `assets/${trimmed}`;
+}
+
+function colorFromName(name: string) {
+  const palette = ["#f59e0b", "#f97316", "#60a5fa", "#22c55e", "#a78bfa", "#fb7185"];
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash << 5) - hash + name.charCodeAt(i);
+  return palette[Math.abs(hash) % palette.length];
+}
+
+function toMaterialIcon(path: string, type: "file" | "directory") {
+  if (type === "directory") return "folder";
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "md") return "description";
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) return "image";
+  if (ext === "pdf") return "picture_as_pdf";
+  if (["ts", "tsx", "js", "jsx", "json", "yaml", "yml"].includes(ext)) return "code";
+  return "draft";
+}
+
+function MarkdownIcon() {
+  return (
+    <span className="material-symbols-rounded text-[16px] leading-none text-[#0078d4]" aria-hidden>
+      markdown
+    </span>
+  );
+}
+
+function AddActionIcon() {
+  return (
+    <span
+      className="material-symbols-rounded text-[18px] leading-none text-sky-500"
+      style={{ fontVariationSettings: '"FILL" 1, "wght" 500, "GRAD" 0, "opsz" 20' }}
+      aria-hidden
+    >
+      add_circle
+    </span>
+  );
+}
+
+function ProjectsIcon() {
+  return (
+    <span
+      className="material-symbols-rounded text-[17px] leading-none text-sky-500"
+      style={{ fontVariationSettings: '"FILL" 1, "wght" 550, "GRAD" 0, "opsz" 20' }}
+      aria-hidden
+    >
+      workspaces
+    </span>
+  );
+}
+
+function FolderIcon({ color = "#f59e0b", size = 16, className = "" }: { color?: string; size?: number; className?: string }) {
+  return (
+    <span
+      className={`material-symbols-rounded leading-none ${className}`}
+      style={{
+        color,
+        fontSize: `${size}px`,
+        fontVariationSettings: '"FILL" 1, "wght" 520, "GRAD" 0, "opsz" 20',
+      }}
+      aria-hidden
+    >
+      folder
+    </span>
+  );
+}
+
+export function Sidebar({ onToggleCollapse, projectId, preferences, onPreferencesChange, onProjectSelect, selectedFile, onFileSelect }: SidebarProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -35,8 +121,9 @@ export function Sidebar({ projectId, onProjectSelect, selectedFile, onFileSelect
   const templatesQuery = useListTemplates();
 
   const projects = Array.isArray(projectsQuery.data) ? projectsQuery.data : [];
-  const files = Array.isArray(filesQuery.data) ? filesQuery.data : [];
+  const files = (Array.isArray(filesQuery.data) ? filesQuery.data : []) as FileEntry[];
   const templates = Array.isArray(templatesQuery.data) ? templatesQuery.data : [];
+  const selectedProject = projects.find((p) => p.id === projectId) ?? null;
 
   useEffect(() => {
     if (!projectsQuery.error) return;
@@ -58,56 +145,362 @@ export function Sidebar({ projectId, onProjectSelect, selectedFile, onFileSelect
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectTemplate, setNewProjectTemplate] = useState("plain");
 
-  const [isNewFileOpen, setIsNewFileOpen] = useState(false);
-  const [newFileName, setNewFileName] = useState("");
+  const [isCreatingFileInline, setIsCreatingFileInline] = useState(false);
+  const [inlineFileName, setInlineFileName] = useState("untitled.md");
 
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
   const [editProjectName, setEditProjectName] = useState("");
 
+  const [isAssetsExpanded, setIsAssetsExpanded] = useState(false);
+  const [isNewAssetFolderOpen, setIsNewAssetFolderOpen] = useState(false);
+  const [newAssetFolderName, setNewAssetFolderName] = useState("");
+  const [renamingAssetPath, setRenamingAssetPath] = useState<string | null>(null);
+  const [renameAssetName, setRenameAssetName] = useState("");
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [draftPreferences, setDraftPreferences] = useState<AppPreferences>(preferences);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const inlineFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isCreatingFileInline) return;
+    const id = window.requestAnimationFrame(() => inlineFileInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(id);
+  }, [isCreatingFileInline]);
+
+  useEffect(() => {
+    if (!isSettingsOpen) return;
+    setDraftPreferences(preferences);
+  }, [isSettingsOpen, preferences]);
+
+  const rootFiles = useMemo(
+    () => files.filter((f) => !f.path.startsWith("assets/")).sort((a, b) => {
+      if (a.path === "main.md") return -1;
+      if (b.path === "main.md") return 1;
+      return a.path.localeCompare(b.path);
+    }),
+    [files],
+  );
+
+  const assetChildren = useMemo(
+    () => files
+      .filter((f) => f.path !== "assets/" && f.path.startsWith("assets/"))
+      .sort((a, b) => {
+        if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+        return a.path.localeCompare(b.path);
+      }),
+    [files],
+  );
+
   const handleCreateProject = async () => {
-    if (!newProjectName.trim()) return;
+    const name = newProjectName.trim();
+    if (!name) return;
+
+    const projectsKey = getListProjectsQueryKey();
+    const previousProjects = queryClient.getQueryData(projectsKey) as unknown[] | undefined;
+    const tempId = -Date.now();
+    const nowIso = new Date().toISOString();
+
+    setIsNewProjectOpen(false);
+    setNewProjectName("");
+
+    queryClient.setQueryData(projectsKey, (old: unknown) => {
+      const items = Array.isArray(old) ? old : [];
+      return [
+        ...items,
+        {
+          id: tempId,
+          name,
+          template: newProjectTemplate,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        },
+      ];
+    });
+
     try {
       const proj = await createProject.mutateAsync({
-        data: { name: newProjectName, template: newProjectTemplate as any }
+        data: { name, template: newProjectTemplate as any }
       });
-      setIsNewProjectOpen(false);
-      setNewProjectName("");
-      queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
+
+      queryClient.setQueryData(projectsKey, (old: unknown) => {
+        const items = Array.isArray(old) ? old : [];
+        const replaced = items.map((item) => {
+          if (typeof item === "object" && item !== null && "id" in item && (item as { id: unknown }).id === tempId) {
+            return proj;
+          }
+          return item;
+        });
+        return replaced;
+      });
+
       onProjectSelect(proj.id);
       toast({ title: "Project created" });
     } catch (e) {
+      queryClient.setQueryData(projectsKey, previousProjects ?? []);
       toast({ title: getErrorMessage(e, "Error creating project"), variant: "destructive" });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: projectsKey });
     }
   };
 
-  const handleCreateFile = async () => {
-    if (!projectId || !newFileName.trim()) return;
+  const handleCreateFile = async (nameInput?: string) => {
+    if (!projectId) return;
+    const raw = (nameInput ?? inlineFileName).trim();
+    if (!raw) {
+      setIsCreatingFileInline(false);
+      return;
+    }
+
+    const filesKey = getListFilesQueryKey(projectId);
+    const previousFiles = queryClient.getQueryData(filesKey) as unknown[] | undefined;
+    const name = raw.endsWith(".md") ? raw : `${raw}.md`;
+
+    setIsCreatingFileInline(false);
+    setInlineFileName("untitled.md");
+
+    queryClient.setQueryData(filesKey, (old: unknown) => {
+      const items = Array.isArray(old) ? old : [];
+      return [
+        ...items,
+        {
+          path: name,
+          name,
+          type: "file",
+          size: 0,
+        },
+      ];
+    });
+    onFileSelect(name);
+
     try {
-      const name = newFileName.endsWith(".md") ? newFileName : `${newFileName}.md`;
-      await createFile.mutateAsync({
+      const created = await createFile.mutateAsync({
         projectId,
         data: { path: name, content: "# " + name.replace(".md", "") }
       });
-      setIsNewFileOpen(false);
-      setNewFileName("");
-      queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) });
-      onFileSelect(name);
+
+      queryClient.setQueryData(filesKey, (old: unknown) => {
+        const items = Array.isArray(old) ? old : [];
+        return items.map((item) => {
+          if (typeof item === "object" && item !== null && "path" in item && (item as { path: unknown }).path === name) {
+            return created;
+          }
+          return item;
+        });
+      });
+
       toast({ title: "File created" });
     } catch (e) {
+      queryClient.setQueryData(filesKey, previousFiles ?? []);
       toast({ title: "Error creating file", variant: "destructive" });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: filesKey });
+    }
+  };
+
+  const handleCreateAssetFolder = async () => {
+    if (!projectId || !newAssetFolderName.trim()) return;
+    const filesKey = getListFilesQueryKey(projectId);
+    const previousFiles = queryClient.getQueryData(filesKey) as unknown[] | undefined;
+    const folderPath = `${normalizeAssetPath(newAssetFolderName).replace(/\/+$/, "")}/`;
+    const folderName = folderPath.split("/").filter(Boolean).pop() ?? "folder";
+
+    setIsNewAssetFolderOpen(false);
+    setNewAssetFolderName("");
+    setIsAssetsExpanded(true);
+
+    queryClient.setQueryData(filesKey, (old: unknown) => {
+      const items = Array.isArray(old) ? old : [];
+      return [
+        ...items,
+        {
+          path: folderPath,
+          name: folderName,
+          type: "directory",
+        },
+      ];
+    });
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/assets/folders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: folderPath }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to create folder");
+      }
+
+      toast({ title: "Folder created" });
+    } catch (e) {
+      queryClient.setQueryData(filesKey, previousFiles ?? []);
+      toast({ title: "Error creating folder", variant: "destructive" });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: filesKey });
+    }
+  };
+
+  const handleAssetUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!projectId) return;
+    const files = e.currentTarget.files;
+    if (!files || files.length === 0) return;
+
+    const filesKey = getListFilesQueryKey(projectId);
+    const previousFiles = queryClient.getQueryData(filesKey) as unknown[] | undefined;
+
+    for (const file of Array.from(files)) {
+      const mimeType = file.type;
+      const reader = new FileReader();
+
+      reader.onload = async () => {
+        const base64 = reader.result?.toString().split(",")[1] || "";
+        const path = `assets/${file.name}`;
+
+        queryClient.setQueryData(filesKey, (old: unknown) => {
+          const items = Array.isArray(old) ? old : [];
+          return [
+            ...items,
+            { path, name: file.name, type: "file", size: file.size },
+          ];
+        });
+
+        try {
+            const response = await fetch(`/api/projects/${projectId}/assets/upload`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path,
+              contentBase64: base64,
+              mimeType,
+            }),
+          });
+
+            if (!response.ok) {
+              throw new Error("Failed to upload asset");
+            }
+
+          toast({ title: `Uploaded ${file.name}` });
+        } catch (err) {
+          queryClient.setQueryData(filesKey, previousFiles ?? []);
+          toast({ title: `Failed to upload ${file.name}`, variant: "destructive" });
+        } finally {
+          queryClient.invalidateQueries({ queryKey: filesKey });
+        }
+      };
+
+      reader.readAsDataURL(file);
+    }
+
+    e.currentTarget.value = "";
+  };
+
+  const handleDeleteAsset = async (filePath: string) => {
+    if (!projectId) return;
+    const filesKey = getListFilesQueryKey(projectId);
+    const previousFiles = queryClient.getQueryData(filesKey) as unknown[] | undefined;
+
+    queryClient.setQueryData(filesKey, (old: unknown) => {
+      const items = (Array.isArray(old) ? old : []) as FileEntry[];
+      if (filePath.endsWith("/")) {
+        return items.filter((f) => !f.path.startsWith(filePath));
+      }
+      return items.filter((f) => f.path !== filePath);
+    });
+
+    try {
+      await deleteFile.mutateAsync({ projectId, filePath });
+      toast({ title: "Asset deleted" });
+    } catch (err) {
+      queryClient.setQueryData(filesKey, previousFiles ?? []);
+      toast({ title: "Error deleting asset", variant: "destructive" });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: filesKey });
+    }
+  };
+
+  const handleRenameAsset = async (oldPath: string) => {
+    if (!projectId || !renameAssetName.trim()) {
+      setRenamingAssetPath(null);
+      return;
+    }
+
+    const trimmedName = renameAssetName.trim();
+    const isFolder = oldPath.endsWith("/");
+    const oldParts = oldPath.split("/").filter(Boolean);
+    const parentParts = isFolder ? oldParts.slice(0, -1) : oldParts.slice(0, -1);
+    const newPath = isFolder
+      ? `${[...parentParts, trimmedName].join("/")}/`
+      : [...parentParts, trimmedName].join("/");
+
+    const filesKey = getListFilesQueryKey(projectId);
+    const previousFiles = queryClient.getQueryData(filesKey) as FileEntry[] | undefined;
+
+    queryClient.setQueryData(filesKey, (old: unknown) => {
+      const items = (Array.isArray(old) ? old : []) as FileEntry[];
+      if (isFolder) {
+        return items.map((entry) => {
+          if (!entry.path.startsWith(oldPath)) return entry;
+          const nextPath = `${newPath}${entry.path.slice(oldPath.length)}`;
+          return {
+            ...entry,
+            path: nextPath,
+            name: nextPath.endsWith("/")
+              ? (nextPath.split("/").filter(Boolean).pop() ?? entry.name)
+              : (nextPath.split("/").pop() ?? entry.name),
+          };
+        });
+      }
+
+      return items.map((entry) => {
+        if (entry.path !== oldPath) return entry;
+        return {
+          ...entry,
+          path: newPath,
+          name: newPath.split("/").pop() ?? entry.name,
+        };
+      });
+    });
+
+    setRenamingAssetPath(null);
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/assets/rename`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromPath: oldPath, toPath: newPath }),
+      });
+
+      if (!response.ok) throw new Error("Rename failed");
+      toast({ title: "Asset renamed" });
+    } catch (err) {
+      queryClient.setQueryData(filesKey, previousFiles ?? []);
+      toast({ title: "Error renaming asset", variant: "destructive" });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: filesKey });
     }
   };
 
   const handleDeleteProject = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm("Are you sure you want to delete this project?")) return;
+
+    const projectsKey = getListProjectsQueryKey();
+    const previousProjects = queryClient.getQueryData(projectsKey) as unknown[] | undefined;
+
+    queryClient.setQueryData(projectsKey, (old: unknown) => {
+      const items = Array.isArray(old) ? old : [];
+      return items.filter((item) => !(typeof item === "object" && item !== null && "id" in item && (item as { id: unknown }).id === id));
+    });
+    if (projectId === id) onProjectSelect(null);
+
     try {
       await deleteProject.mutateAsync({ projectId: id });
-      queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
-      if (projectId === id) onProjectSelect(null);
       toast({ title: "Project deleted" });
     } catch (err) {
+      queryClient.setQueryData(projectsKey, previousProjects ?? []);
       toast({ title: "Error deleting project", variant: "destructive" });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: projectsKey });
     }
   };
 
@@ -116,111 +509,410 @@ export function Sidebar({ projectId, onProjectSelect, selectedFile, onFileSelect
       setEditingProjectId(null);
       return;
     }
+
+    const projectsKey = getListProjectsQueryKey();
+    const previousProjects = queryClient.getQueryData(projectsKey) as unknown[] | undefined;
+    const nextName = editProjectName.trim();
+
+    queryClient.setQueryData(projectsKey, (old: unknown) => {
+      const items = Array.isArray(old) ? old : [];
+      return items.map((item) => {
+        if (typeof item === "object" && item !== null && "id" in item && (item as { id: unknown }).id === id) {
+          return { ...(item as object), name: nextName };
+        }
+        return item;
+      });
+    });
+
     try {
-      await updateProject.mutateAsync({ projectId: id, data: { name: editProjectName } });
+      await updateProject.mutateAsync({ projectId: id, data: { name: nextName } });
       setEditingProjectId(null);
-      queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
     } catch (err) {
+      queryClient.setQueryData(projectsKey, previousProjects ?? []);
       toast({ title: "Error renaming project", variant: "destructive" });
+    } finally {
+      queryClient.invalidateQueries({ queryKey: projectsKey });
     }
   };
 
-  return (
-    <div className="flex flex-col h-full bg-sidebar text-sidebar-foreground">
-      <div className="p-4 border-b border-sidebar-border font-medium flex items-center justify-between">
-        <span className="flex items-center gap-2"><Folder className="w-4 h-4 text-primary" /> Projects</span>
-        <Dialog open={isNewProjectOpen} onOpenChange={setIsNewProjectOpen}>
-          <DialogTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-6 w-6"><Plus className="w-4 h-4" /></Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>New Project</DialogTitle></DialogHeader>
-            <div className="grid gap-4 py-4">
-              <Input placeholder="Project Name" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} />
-              <Select value={newProjectTemplate} onValueChange={setNewProjectTemplate}>
-                <SelectTrigger><SelectValue placeholder="Select Template" /></SelectTrigger>
+  const renderSettingsFooter = () => (
+    <div className="mt-auto border-t border-sidebar-border p-2">
+      <Dialog
+        open={isSettingsOpen}
+        onOpenChange={(open) => {
+          setIsSettingsOpen(open);
+          if (!open) setDraftPreferences(preferences);
+        }}
+      >
+        <DialogTrigger asChild>
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 rounded-lg border border-sky-500/25 bg-gradient-to-r from-sky-500/10 via-indigo-500/10 to-violet-500/10 px-3 py-2 text-sm shadow-sm transition-all duration-200 hover:from-sky-500/20 hover:via-indigo-500/20 hover:to-violet-500/20 hover:shadow-md"
+          >
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-sky-500/20 text-sky-300">
+              <Settings2 className="w-4 h-4" />
+            </span>
+            <span className="flex flex-col items-start leading-tight">
+              <span className="text-sm font-medium">Settings</span>
+              <span className="text-[11px] text-muted-foreground">Preview, Export, Editor</span>
+            </span>
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Document & Editor Settings</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <label className="text-xs text-muted-foreground">Page Size (Preview/Export)</label>
+              <Select
+                value={draftPreferences.pageSize}
+                onValueChange={(value) => setDraftPreferences({ ...draftPreferences, pageSize: value as AppPreferences["pageSize"] })}
+              >
+                <SelectTrigger><SelectValue placeholder="Select page size" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="plain">Plain</SelectItem>
-                  <SelectItem value="academic">Academic</SelectItem>
-                  <SelectItem value="report">Report</SelectItem>
-                  <SelectItem value="letter">Letter</SelectItem>
+                  {PAGE_SIZE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
-              <Button onClick={handleCreateProject}>Create</Button>
             </div>
-          </DialogContent>
-        </Dialog>
-      </div>
 
-      <ScrollArea className="flex-1 border-b border-sidebar-border">
-        <div className="p-2 space-y-1">
-          {projects.map((p) => (
-            <div 
-              key={p.id} 
-              className={`group flex items-center justify-between p-2 rounded-md cursor-pointer text-sm transition-colors ${projectId === p.id ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" : "hover:bg-sidebar-accent/50"}`}
-              onClick={() => onProjectSelect(p.id)}
-            >
-              {editingProjectId === p.id ? (
-                <div className="flex items-center gap-1 w-full" onClick={e => e.stopPropagation()}>
-                  <Input 
-                    value={editProjectName} 
-                    onChange={e => setEditProjectName(e.target.value)} 
-                    className="h-6 py-0 px-1 text-xs" 
-                    autoFocus 
-                    onKeyDown={e => e.key === "Enter" && handleUpdateProject(p.id)}
-                  />
-                  <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => handleUpdateProject(p.id)}><Check className="w-3 h-3" /></Button>
-                  <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setEditingProjectId(null)}><X className="w-3 h-3" /></Button>
-                </div>
-              ) : (
-                <>
-                  <span className="truncate">{p.name}</span>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button variant="ghost" size="icon" className="h-5 w-5 hover:bg-sidebar-accent" onClick={(e) => { e.stopPropagation(); setEditingProjectId(p.id); setEditProjectName(p.name); }}><Edit2 className="w-3 h-3" /></Button>
-                    <Button variant="ghost" size="icon" className="h-5 w-5 hover:bg-destructive hover:text-destructive-foreground" onClick={(e) => handleDeleteProject(p.id, e)}><Trash2 className="w-3 h-3" /></Button>
-                  </div>
-                </>
-              )}
+            <div className="grid gap-2">
+              <label className="text-xs text-muted-foreground">Document Font (Overleaf/Reports)</label>
+              <Select
+                value={draftPreferences.documentFont}
+                onValueChange={(value) => setDraftPreferences({ ...draftPreferences, documentFont: value as AppPreferences["documentFont"] })}
+              >
+                <SelectTrigger><SelectValue placeholder="Select document font" /></SelectTrigger>
+                <SelectContent>
+                  {DOCUMENT_FONT_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label} • {opt.group}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          ))}
-          {projects.length === 0 && <div className="text-sm text-muted-foreground p-2 text-center">No projects yet</div>}
-        </div>
-      </ScrollArea>
 
-      {projectId && (
-        <>
-          <div className="p-4 border-b border-sidebar-border font-medium flex items-center justify-between">
-            <span className="flex items-center gap-2"><FileText className="w-4 h-4 text-primary" /> Files</span>
-            <Dialog open={isNewFileOpen} onOpenChange={setIsNewFileOpen}>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <label className="text-xs text-muted-foreground">Preview/Export Font Size (pt)</label>
+                <Input
+                  type="number"
+                  min={9}
+                  max={16}
+                  value={draftPreferences.renderFontSizePt ?? 11}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    if (Number.isNaN(next)) return;
+                    setDraftPreferences({ ...draftPreferences, renderFontSizePt: Math.min(16, Math.max(9, next)) });
+                  }}
+                />
+              </div>
+              <div className="grid gap-2">
+                <label className="text-xs text-muted-foreground">Preview/Export Line Stretch</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={1.6}
+                  step={0.05}
+                  value={draftPreferences.renderLineStretch ?? 1.1}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    if (Number.isNaN(next)) return;
+                    setDraftPreferences({ ...draftPreferences, renderLineStretch: Math.min(1.6, Math.max(1, next)) });
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-xs text-muted-foreground">Editor Font Family</label>
+              <Select
+                value={draftPreferences.editorFontFamily}
+                onValueChange={(value) => setDraftPreferences({ ...draftPreferences, editorFontFamily: value as AppPreferences["editorFontFamily"] })}
+              >
+                <SelectTrigger><SelectValue placeholder="Select editor font" /></SelectTrigger>
+                <SelectContent>
+                  {EDITOR_FONT_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <label className="text-xs text-muted-foreground">Editor Font Size</label>
+                <Input
+                  type="number"
+                  min={10}
+                  max={28}
+                  value={draftPreferences.editorFontSize}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    if (Number.isNaN(next)) return;
+                    setDraftPreferences({ ...draftPreferences, editorFontSize: Math.min(28, Math.max(10, next) )});
+                  }}
+                />
+              </div>
+              <div className="grid gap-2">
+                <label className="text-xs text-muted-foreground">Line Height</label>
+                <Input
+                  type="number"
+                  min={1.2}
+                  max={2}
+                  step={0.05}
+                  value={draftPreferences.editorLineHeight}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    if (Number.isNaN(next)) return;
+                    setDraftPreferences({ ...draftPreferences, editorLineHeight: Math.min(2, Math.max(1.2, next)) });
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDraftPreferences(preferences);
+                  setIsSettingsOpen(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  onPreferencesChange({
+                    ...draftPreferences,
+                    renderFontSizePt: draftPreferences.renderFontSizePt ?? 11,
+                    renderLineStretch: draftPreferences.renderLineStretch ?? 1.1,
+                  });
+                  setIsSettingsOpen(false);
+                  toast({ title: "Settings Saved" });
+                }}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+
+  if (!projectId) {
+    return (
+      <div className="flex flex-col h-full bg-sidebar text-sidebar-foreground">
+        <div className="p-4 border-b border-sidebar-border font-medium flex items-center justify-between">
+          <span className="flex items-center gap-2"><ProjectsIcon /> Projects</span>
+          <div className="flex items-center gap-1">
+            <Dialog open={isNewProjectOpen} onOpenChange={setIsNewProjectOpen}>
               <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-6 w-6"><Plus className="w-4 h-4" /></Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6"><AddActionIcon /></Button>
               </DialogTrigger>
               <DialogContent>
-                <DialogHeader><DialogTitle>New File</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle>New Project</DialogTitle></DialogHeader>
                 <div className="grid gap-4 py-4">
-                  <Input placeholder="File name (e.g. intro.md)" value={newFileName} onChange={(e) => setNewFileName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleCreateFile()} />
-                  <Button onClick={handleCreateFile}>Create</Button>
+                  <Input placeholder="Project Name" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} />
+                  <Select value={newProjectTemplate} onValueChange={setNewProjectTemplate}>
+                    <SelectTrigger><SelectValue placeholder="Select Template" /></SelectTrigger>
+                    <SelectContent>
+                      {templates.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={handleCreateProject}>Create</Button>
                 </div>
               </DialogContent>
             </Dialog>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onToggleCollapse} aria-label="Collapse sidebar">
+              <PanelLeftClose className="w-4 h-4" />
+            </Button>
           </div>
-          <ScrollArea className="flex-1">
-            <div className="p-2 space-y-1">
-              {files.map((f) => (
-                <div 
-                  key={f.path} 
-                  className={`group flex items-center gap-2 p-2 rounded-md cursor-pointer text-sm transition-colors ${selectedFile === f.path ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" : "hover:bg-sidebar-accent/50"}`}
-                  onClick={() => onFileSelect(f.path)}
-                >
-                  <File className="w-4 h-4 text-muted-foreground" />
-                  <span className="truncate flex-1">{f.name}</span>
+        </div>
+
+        <ScrollArea className="flex-1">
+          <div className="p-2 space-y-1">
+            {projects.map((p) => (
+              <div
+                key={p.id}
+                className="group flex items-center justify-between p-2 rounded-md cursor-pointer text-sm transition-colors hover:bg-sidebar-accent/50"
+                onClick={() => onProjectSelect(p.id)}
+              >
+                {editingProjectId === p.id ? (
+                  <div className="flex items-center gap-1 w-full" onClick={(e) => e.stopPropagation()}>
+                    <Input
+                      value={editProjectName}
+                      onChange={(e) => setEditProjectName(e.target.value)}
+                      className="h-6 py-0 px-1 text-xs"
+                      autoFocus
+                      onKeyDown={(e) => e.key === "Enter" && handleUpdateProject(p.id)}
+                    />
+                    <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => handleUpdateProject(p.id)}><Check className="w-3 h-3" /></Button>
+                    <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setEditingProjectId(null)}><X className="w-3 h-3" /></Button>
+                  </div>
+                ) : (
+                  <>
+                    <span className="flex items-center gap-2 truncate">
+                      <FolderIcon color={colorFromName(p.name)} className="transition-transform group-hover:scale-110" />
+                      <span className="truncate">{p.name}</span>
+                    </span>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button variant="ghost" size="icon" className="h-5 w-5 hover:bg-sidebar-accent" onClick={(e) => { e.stopPropagation(); setEditingProjectId(p.id); setEditProjectName(p.name); }}><Edit2 className="w-3 h-3" /></Button>
+                      <Button variant="ghost" size="icon" className="h-5 w-5 hover:bg-destructive hover:text-destructive-foreground" onClick={(e) => handleDeleteProject(p.id, e)}><Trash2 className="w-3 h-3" /></Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+            {projects.length === 0 && <div className="text-sm text-muted-foreground p-2 text-center">No projects yet</div>}
+          </div>
+        </ScrollArea>
+        {renderSettingsFooter()}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full bg-sidebar text-sidebar-foreground">
+      <div className="p-4 border-b border-sidebar-border font-medium flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onProjectSelect(null)}>
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <FolderIcon color={colorFromName(selectedProject?.name ?? "project")} />
+          <span className="truncate">{selectedProject?.name ?? "Project"}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => {
+              setInlineFileName("untitled.md");
+              setIsCreatingFileInline(true);
+            }}
+            aria-label="Create new file"
+          >
+            <AddActionIcon />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onToggleCollapse} aria-label="Collapse sidebar">
+            <PanelLeftClose className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+
+      <ScrollArea className="flex-1">
+        <div className="p-2 space-y-1">
+          <div className="group flex items-center gap-2 p-2 rounded-md hover:bg-sidebar-accent/50 transition-colors text-sm">
+            <button onClick={() => setIsAssetsExpanded((v) => !v)} className="flex items-center gap-2 flex-1 min-w-0">
+              <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-transform ${isAssetsExpanded ? "" : "-rotate-90"}`} />
+              <FolderIcon color="#f59e0b" />
+              <span className="truncate">assets</span>
+            </button>
+            <Dialog open={isNewAssetFolderOpen} onOpenChange={setIsNewAssetFolderOpen}>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => e.stopPropagation()}><AddActionIcon /></Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>New Asset Folder</DialogTitle></DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <Input placeholder="Folder path (e.g. images/icons)" value={newAssetFolderName} onChange={(e) => setNewAssetFolderName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleCreateAssetFolder()} />
+                  <Button onClick={handleCreateAssetFolder}>Create</Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="w-3 h-3" />
+            </Button>
+          </div>
+
+          <input ref={fileInputRef} type="file" multiple accept="image/*,.svg,.pdf" onChange={handleAssetUpload} className="hidden" />
+
+          {isAssetsExpanded && (
+            <div className="pl-5 space-y-1">
+              {assetChildren.map((entry) => (
+                <div key={entry.path} className="group flex items-center gap-2 p-1.5 rounded-md hover:bg-sidebar-accent/50 text-xs">
+                  {entry.type === "directory" ? (
+                    <FolderIcon color="#f59e0b" size={14} className="transition-transform group-hover:scale-110" />
+                  ) : (
+                    <span className="material-symbols-rounded text-[14px] leading-none text-muted-foreground" aria-hidden>
+                      {toMaterialIcon(entry.path, entry.type)}
+                    </span>
+                  )}
+                  {renamingAssetPath === entry.path ? (
+                    <>
+                      <Input
+                        className="h-6 text-xs"
+                        value={renameAssetName}
+                        onChange={(e) => setRenameAssetName(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && void handleRenameAsset(entry.path)}
+                        autoFocus
+                      />
+                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => void handleRenameAsset(entry.path)}><Check className="w-3 h-3" /></Button>
+                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setRenamingAssetPath(null)}><X className="w-3 h-3" /></Button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="truncate flex-1">{entry.path.replace(/^assets\//, "")}</span>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { setRenamingAssetPath(entry.path); setRenameAssetName(entry.path.split("/").filter(Boolean).pop() ?? entry.name); }}><Edit2 className="w-3 h-3" /></Button>
+                        <Button variant="ghost" size="icon" className="h-5 w-5 hover:bg-destructive hover:text-destructive-foreground" onClick={() => void handleDeleteAsset(entry.path)}><Trash2 className="w-3 h-3" /></Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
-              {files.length === 0 && <div className="text-sm text-muted-foreground p-2 text-center">No files in project</div>}
+              {assetChildren.length === 0 && <div className="text-xs text-muted-foreground px-2 py-1">No assets yet</div>}
             </div>
-          </ScrollArea>
-        </>
-      )}
+          )}
+
+          {isCreatingFileInline && (
+            <div className="flex items-center gap-2 p-2 rounded-md bg-sidebar-accent/50 border border-sidebar-border">
+              <MarkdownIcon />
+              <Input
+                ref={inlineFileInputRef}
+                className="h-7 text-sm"
+                value={inlineFileName}
+                onChange={(e) => setInlineFileName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleCreateFile(inlineFileName);
+                  if (e.key === "Escape") setIsCreatingFileInline(false);
+                }}
+                onBlur={() => {
+                  if (inlineFileName.trim()) {
+                    void handleCreateFile(inlineFileName);
+                  } else {
+                    setIsCreatingFileInline(false);
+                  }
+                }}
+              />
+            </div>
+          )}
+
+          {rootFiles.map((f) => (
+            <div
+              key={f.path}
+              className={`group flex items-center gap-2 p-2 rounded-md cursor-pointer text-sm transition-colors ${selectedFile === f.path ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" : "hover:bg-sidebar-accent/50"}`}
+              onClick={() => onFileSelect(f.path)}
+            >
+              {f.path.endsWith(".md") ? (
+                <MarkdownIcon />
+              ) : (
+                <span className="material-symbols-rounded text-[16px] leading-none text-muted-foreground" aria-hidden>
+                  {toMaterialIcon(f.path, f.type)}
+                </span>
+              )}
+              <span className="truncate flex-1">{f.name}</span>
+            </div>
+          ))}
+        </div>
+      </ScrollArea>
+      {renderSettingsFooter()}
     </div>
   );
 }

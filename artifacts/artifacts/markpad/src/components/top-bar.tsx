@@ -1,20 +1,34 @@
-import { FileDown, History, Moon, Sun, Save } from "lucide-react";
+import { Check, FileDown, History, Loader2, Moon, Save, Sun } from "lucide-react";
+import { useState } from "react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { exportProject, useGetProjectStats, getGetProjectStatsQueryKey } from "@workspace/api-client-react";
+import { useGetProjectStats, getGetProjectStatsQueryKey } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+import { AppPreferences } from "@/lib/preferences";
 
 interface TopBarProps {
   projectId: number | null;
   selectedFile: string | null;
+  content: string;
+  preferences: AppPreferences;
   onSave: () => void;
   onOpenHistory: () => void;
+  isSaving?: boolean;
+  showSavedToast?: boolean;
 }
 
-export function TopBar({ projectId, selectedFile, onSave, onOpenHistory }: TopBarProps) {
+export function TopBar({ projectId, selectedFile, content, preferences, onSave, onOpenHistory, isSaving = false, showSavedToast = false }: TopBarProps) {
   const { theme, setTheme } = useTheme();
   const { toast } = useToast();
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleToggleTheme = () => {
+    const root = document.documentElement;
+    root.classList.add("theme-animate");
+    setTheme(theme === "dark" ? "light" : "dark");
+    window.setTimeout(() => root.classList.remove("theme-animate"), 180);
+  };
   
   const { data: stats } = useGetProjectStats(projectId as number, { 
     query: { enabled: !!projectId, queryKey: getGetProjectStatsQueryKey(projectId as number) } 
@@ -22,67 +36,130 @@ export function TopBar({ projectId, selectedFile, onSave, onOpenHistory }: TopBa
 
   const handleExport = async (format: "pdf" | "md" | "latex") => {
     if (!projectId) return;
+    const startedAt = Date.now();
+    setIsExporting(true);
     try {
-      const blob = await exportProject(projectId, { format, file: selectedFile ?? undefined });
+      const baseName = selectedFile?.replace(/\.md$/, "") || "markpad";
+
+      if (format === "md") {
+        const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+        const objectUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = `${baseName}.md`;
+        anchor.click();
+        URL.revokeObjectURL(objectUrl);
+        toast({ title: "Exported as Markdown" });
+        return;
+      }
+
+      const endpoint = format === "pdf"
+        ? `/api/projects/${projectId}/render`
+        : `/api/projects/${projectId}/export/latex`;
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content,
+          options: {
+            pageSize: preferences.pageSize,
+            documentFont: preferences.documentFont,
+              fontSizePt: preferences.renderFontSizePt,
+              lineStretch: preferences.renderLineStretch,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Export failed: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
-      anchor.download = `${selectedFile?.replace(/\.md$/, "") || "markpad"}.${format === "latex" ? "tex" : format}`;
+      anchor.download = `${baseName}.${format === "latex" ? "tex" : "pdf"}`;
       anchor.click();
       URL.revokeObjectURL(objectUrl);
       toast({ title: `Exported as ${format.toUpperCase()}` });
     } catch (err) {
       toast({ title: "Export failed", variant: "destructive" });
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 600) {
+        await new Promise((resolve) => window.setTimeout(resolve, 600 - elapsed));
+      }
+      setIsExporting(false);
     }
   };
 
   return (
-    <header className="h-14 border-b border-border bg-card flex items-center justify-between px-4 shrink-0 shadow-sm z-10">
-      <div className="flex items-center gap-4">
+    <header className="relative h-14 border-b border-border bg-card flex items-center justify-between px-4 shrink-0 shadow-sm z-10">
+      <div className="flex items-center gap-4 min-w-0">
         <h1 className="font-bold text-lg tracking-tight text-primary flex items-center gap-2">
-          <div className="w-6 h-6 bg-primary rounded-sm flex items-center justify-center">
-            <span className="text-primary-foreground text-xs">MP</span>
+          <div className="w-6 h-6 rounded-sm bg-black flex items-center justify-center shadow-sm">
+            <span className="text-white text-xs font-semibold leading-none">MP</span>
           </div>
           MarkPad
         </h1>
         {stats && (
           <div className="hidden md:flex items-center gap-4 text-xs text-muted-foreground ml-4 border-l border-border pl-4">
             <span>{stats.totalFiles} files</span>
-            <span>{stats.totalWords} words total</span>
           </div>
         )}
       </div>
 
+      <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 md:flex md:flex-col md:items-center md:gap-0.5">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.3em] text-muted-foreground/70">Markdown + LaTeX</span>
+        <span className="text-xs text-muted-foreground">Markdown-first Writing, LaTeX-Ready Publishing</span>
+      </div>
+
       <div className="flex items-center gap-2">
-        <Button 
-          variant="outline" 
-          size="sm" 
-          className="gap-2" 
-          disabled={!projectId || !selectedFile}
-          onClick={onSave}
-        >
-          <Save className="w-4 h-4" />
-          <span className="hidden sm:inline">Save</span>
-        </Button>
+        <div className="relative">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="gap-2 border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200 transition-all duration-200 shadow-sm hover:shadow-md" 
+            disabled={!projectId || !selectedFile || isSaving || isExporting}
+            onClick={onSave}
+          >
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            <span className="hidden sm:inline">{isSaving ? "Saving..." : "Save"}</span>
+          </Button>
+          {showSavedToast && (
+            <div className="absolute left-1/2 top-full mt-1 -translate-x-1/2 rounded-md bg-green-600 px-2 py-1 text-[11px] font-medium text-white shadow-sm">
+              <span className="inline-flex items-center gap-1">
+                <Check className="h-3 w-3" />
+                Saved
+              </span>
+            </div>
+          )}
+        </div>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-2" disabled={!projectId}>
-              <FileDown className="w-4 h-4" />
-              <span className="hidden sm:inline">Export</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-sky-500/40 bg-sky-500/10 text-sky-700 hover:bg-sky-500/20 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200 transition-all duration-200 shadow-sm hover:shadow-md"
+              disabled={!projectId || !selectedFile || isExporting}
+            >
+              {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+              <span className="hidden sm:inline">{isExporting ? "Exporting..." : "Export"}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => handleExport("pdf")}>Export as PDF</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleExport("md")}>Export as Markdown</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleExport("latex")}>Export as LaTeX</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void handleExport("pdf")}>Export as PDF</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void handleExport("md")}>Export as Markdown</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void handleExport("latex")}>Export as LaTeX</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
         <Button 
           variant="outline" 
           size="sm" 
-          className="gap-2" 
+          className="gap-2 border-violet-500/40 bg-violet-500/10 text-violet-700 hover:bg-violet-500/20 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-200 transition-all duration-200 shadow-sm hover:shadow-md" 
           disabled={!projectId || !selectedFile}
           onClick={onOpenHistory}
         >
@@ -93,10 +170,11 @@ export function TopBar({ projectId, selectedFile, onSave, onOpenHistory }: TopBa
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          className="relative transition-all duration-150 hover:scale-105 hover:bg-accent/50"
+          onClick={handleToggleTheme}
         >
-          <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-          <Moon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+          <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all duration-200 dark:-rotate-90 dark:scale-0" />
+          <Moon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all duration-200 dark:rotate-0 dark:scale-100" />
           <span className="sr-only">Toggle theme</span>
         </Button>
       </div>

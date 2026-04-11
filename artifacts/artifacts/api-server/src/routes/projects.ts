@@ -11,6 +11,7 @@ import {
   ListTemplatesResponseItem,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
+import { handleRouteError } from "../lib/http";
 
 const router = Router();
 
@@ -128,8 +129,10 @@ router.get("/projects", async (req, res) => {
       .orderBy(projectsTable.updatedAt);
     res.json(projects);
   } catch (err) {
-    req.log.error({ err }, "Failed to list projects");
-    res.status(500).json({ error: "Failed to list projects" });
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to list projects",
+      publicMessage: "Failed to list projects",
+    });
   }
 });
 
@@ -154,10 +157,19 @@ router.post("/projects", async (req, res) => {
       content,
     });
 
+    await db.insert(filesTable).values({
+      projectId: project.id,
+      path: "assets/",
+      name: "assets",
+      content: "",
+    });
+
     res.status(201).json(project);
   } catch (err) {
-    req.log.error({ err }, "Failed to create project");
-    res.status(500).json({ error: "Failed to create project" });
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to create project",
+      publicMessage: "Failed to create project",
+    });
   }
 });
 
@@ -167,8 +179,10 @@ router.delete("/projects/:projectId", async (req, res) => {
     await db.delete(projectsTable).where(eq(projectsTable.id, projectId));
     res.json({ success: true });
   } catch (err) {
-    req.log.error({ err }, "Failed to delete project");
-    res.status(500).json({ error: "Failed to delete project" });
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to delete project",
+      publicMessage: "Failed to delete project",
+    });
   }
 });
 
@@ -187,8 +201,10 @@ router.patch("/projects/:projectId", async (req, res) => {
     }
     res.json(project);
   } catch (err) {
-    req.log.error({ err }, "Failed to update project");
-    res.status(500).json({ error: "Failed to update project" });
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to update project",
+      publicMessage: "Failed to update project",
+    });
   }
 });
 
@@ -196,10 +212,27 @@ router.get("/projects/:projectId/stats", async (req, res) => {
   try {
     const { projectId } = GetProjectStatsParams.parse(req.params);
 
-    const files = await db
-      .select()
+    const [totalFilesResult] = await db
+      .select({ count: sql<number>`count(*)` })
       .from(filesTable)
-      .where(eq(filesTable.projectId, projectId));
+      .where(
+        sql`${filesTable.projectId} = ${projectId}
+            AND ${filesTable.path} NOT LIKE 'assets/%'
+            AND ${filesTable.path} NOT LIKE '%/'`,
+      );
+
+    const files = await db
+      .select({
+        path: filesTable.path,
+        content: filesTable.content,
+        updatedAt: filesTable.updatedAt,
+      })
+      .from(filesTable)
+      .where(
+        sql`${filesTable.projectId} = ${projectId}
+            AND ${filesTable.path} NOT LIKE 'assets/%'
+            AND ${filesTable.path} NOT LIKE '%/'`,
+      );
 
     const [snapshotCount] = await db
       .select({ count: sql<number>`count(*)` })
@@ -217,14 +250,16 @@ router.get("/projects/:projectId/stats", async (req, res) => {
     }
 
     res.json({
-      totalFiles: files.length,
+      totalFiles: Number(totalFilesResult.count),
       totalWords,
       totalSnapshots: Number(snapshotCount.count),
       lastEditedAt,
     });
   } catch (err) {
-    req.log.error({ err }, "Failed to get project stats");
-    res.status(500).json({ error: "Failed to get project stats" });
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to get project stats",
+      publicMessage: "Failed to get project stats",
+    });
   }
 });
 

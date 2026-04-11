@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&family=Fira+Code:wght@400;500;700&family=Source+Code+Pro:wght@400;600;700&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
@@ -151,45 +151,45 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  /* Slate & Ink Palette Dark */
-  --background: 222 47% 11%;
-  --foreground: 210 40% 98%;
+  /* VS Code Dark+ inspired palette */
+  --background: 0 0% 12%;      /* #1e1e1e */
+  --foreground: 0 0% 83%;      /* #d4d4d4 */
   
-  --card: 222 47% 13%;
-  --card-foreground: 210 40% 98%;
-  --card-border: 217 32% 17%;
+  --card: 240 2% 15%;          /* #252526 */
+  --card-foreground: 0 0% 83%;
+  --card-border: 0 0% 24%;     /* #3c3c3c */
   
-  --popover: 222 47% 13%;
-  --popover-foreground: 210 40% 98%;
-  --popover-border: 217 32% 17%;
+  --popover: 240 2% 15%;
+  --popover-foreground: 0 0% 83%;
+  --popover-border: 0 0% 24%;
   
-  --primary: 210 40% 98%;
-  --primary-foreground: 222 47% 11%;
+  --primary: 204 100% 40%;     /* #007acc */
+  --primary-foreground: 0 0% 100%;
   
-  --secondary: 217 32% 17%;
-  --secondary-foreground: 210 40% 98%;
+  --secondary: 0 0% 18%;       /* #2d2d2d */
+  --secondary-foreground: 0 0% 83%;
   
-  --muted: 217 32% 17%;
-  --muted-foreground: 215 20.2% 65.1%;
+  --muted: 0 0% 16%;           /* #292929 */
+  --muted-foreground: 0 0% 66%;/* #aaaaaa */
   
-  --accent: 217 32% 17%;
-  --accent-foreground: 210 40% 98%;
+  --accent: 210 5% 19%;        /* #2a2d2e-ish */
+  --accent-foreground: 0 0% 90%;
   
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 210 40% 98%;
   
-  --border: 217 32% 17%;
-  --input: 217 32% 17%;
-  --ring: 212.7 26.8% 83.9%;
+  --border: 0 0% 24%;
+  --input: 0 0% 24%;
+  --ring: 204 100% 48%;        /* focus blue */
   
-  --sidebar: 222 47% 11%;
-  --sidebar-foreground: 210 40% 98%;
-  --sidebar-border: 217 32% 17%;
-  --sidebar-primary: 210 40% 98%;
-  --sidebar-primary-foreground: 222 47% 11%;
-  --sidebar-accent: 217 32% 17%;
-  --sidebar-accent-foreground: 210 40% 98%;
-  --sidebar-ring: 212.7 26.8% 83.9%;
+  --sidebar: 240 2% 15%;
+  --sidebar-foreground: 0 0% 80%;
+  --sidebar-border: 0 0% 22%;
+  --sidebar-primary: 204 100% 40%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 210 5% 19%;
+  --sidebar-accent-foreground: 0 0% 90%;
+  --sidebar-ring: 204 100% 48%;
 
   --chart-1: 220 70% 50%;
   --chart-2: 160 60% 45%;
@@ -206,4 +206,27 @@
   body {
     @apply font-sans antialiased bg-background text-foreground;
   }
+}
+
+.material-symbols-rounded {
+  font-family: 'Material Symbols Rounded';
+  font-weight: 400;
+  font-style: normal;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+}
+
+html.theme-animate *,
+html.theme-animate *::before,
+html.theme-animate *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
 }

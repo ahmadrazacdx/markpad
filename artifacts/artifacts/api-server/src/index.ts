@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { prewarmPdfRenderer } from "./lib/renderer";
 import { setupWebSocket } from "./lib/websocket";
 
 const rawPort = process.env["PORT"];
@@ -26,3 +27,4 @@ const server = app.listen(port, (err) => {
 });
 
 setupWebSocket(server);
+void prewarmPdfRenderer();

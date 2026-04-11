@@ -9,8 +9,14 @@ import {
   PinSnapshotParams,
   PinSnapshotBody,
 } from "@workspace/api-zod";
+import { handleRouteError } from "../lib/http";
 
 const router = Router();
+
+function toFileName(path: string) {
+  const cleaned = path.endsWith("/") ? path.slice(0, -1) : path;
+  return cleaned.split("/").pop() || cleaned;
+}
 
 router.get("/projects/:projectId/history", async (req, res) => {
   try {
@@ -69,8 +75,10 @@ router.get("/projects/:projectId/history", async (req, res) => {
 
     res.json(groups);
   } catch (err) {
-    req.log.error({ err }, "Failed to get history");
-    res.status(500).json({ error: "Failed to get history" });
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to get history",
+      publicMessage: "Failed to get history",
+    });
   }
 });
 
@@ -81,7 +89,7 @@ router.post("/projects/:projectId/history/:snapshotId/restore", async (req, res)
     const [snapshot] = await db
       .select()
       .from(snapshotsTable)
-      .where(eq(snapshotsTable.id, snapshotId));
+      .where(and(eq(snapshotsTable.id, snapshotId), eq(snapshotsTable.projectId, projectId)));
 
     if (!snapshot) {
       res.status(404).json({ error: "Snapshot not found" });
@@ -109,7 +117,7 @@ router.post("/projects/:projectId/history/:snapshotId/restore", async (req, res)
       });
     }
 
-    await db
+    const [updatedFile] = await db
       .update(filesTable)
       .set({ content: snapshot.content })
       .where(
@@ -117,30 +125,49 @@ router.post("/projects/:projectId/history/:snapshotId/restore", async (req, res)
           eq(filesTable.projectId, projectId),
           eq(filesTable.path, snapshot.filePath)
         )
-      );
+      )
+      .returning({ updatedAt: filesTable.updatedAt });
+
+    let lastSavedAt = new Date().toISOString();
+    if (updatedFile) {
+      lastSavedAt = updatedFile.updatedAt.toISOString();
+    } else {
+      const [createdFile] = await db
+        .insert(filesTable)
+        .values({
+          projectId,
+          path: snapshot.filePath,
+          name: toFileName(snapshot.filePath),
+          content: snapshot.content,
+        })
+        .returning();
+      lastSavedAt = createdFile.updatedAt.toISOString();
+    }
 
     const wordCount = (snapshot.content.match(/\w+/g) || []).length;
     res.json({
       path: snapshot.filePath,
       content: snapshot.content,
       wordCount,
-      lastSavedAt: new Date().toISOString(),
+      lastSavedAt,
     });
   } catch (err) {
-    req.log.error({ err }, "Failed to restore snapshot");
-    res.status(500).json({ error: "Failed to restore snapshot" });
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to restore snapshot",
+      publicMessage: "Failed to restore snapshot",
+    });
   }
 });
 
 router.post("/projects/:projectId/history/:snapshotId/pin", async (req, res) => {
   try {
-    const { snapshotId } = PinSnapshotParams.parse(req.params);
+    const { projectId, snapshotId } = PinSnapshotParams.parse(req.params);
     const { label } = PinSnapshotBody.parse(req.body);
 
     const [snapshot] = await db
       .update(snapshotsTable)
       .set({ label })
-      .where(eq(snapshotsTable.id, snapshotId))
+      .where(and(eq(snapshotsTable.id, snapshotId), eq(snapshotsTable.projectId, projectId)))
       .returning();
 
     if (!snapshot) {
@@ -156,8 +183,10 @@ router.post("/projects/:projectId/history/:snapshotId/pin", async (req, res) => 
       createdAt: snapshot.createdAt.toISOString(),
     });
   } catch (err) {
-    req.log.error({ err }, "Failed to pin snapshot");
-    res.status(500).json({ error: "Failed to pin snapshot" });
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to pin snapshot",
+      publicMessage: "Failed to pin snapshot",
+    });
   }
 });
 

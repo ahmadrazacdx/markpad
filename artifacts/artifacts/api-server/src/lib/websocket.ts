@@ -1,7 +1,36 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
-import { renderMarkdownToPdf } from "./renderer";
+import { renderMarkdownToPdf, RenderOptions } from "./renderer";
 import { logger } from "./logger";
+
+function parseRenderOptions(input: unknown): RenderOptions {
+  if (!input || typeof input !== "object") return {};
+  const raw = input as { pageSize?: unknown; documentFont?: unknown; fontSizePt?: unknown; lineStretch?: unknown };
+  const pageSize =
+    raw.pageSize === "a4" || raw.pageSize === "letter" || raw.pageSize === "legal" || raw.pageSize === "a5"
+      ? raw.pageSize
+      : undefined;
+  const documentFont =
+    raw.documentFont === "latin-modern" ||
+    raw.documentFont === "times-new-roman" ||
+    raw.documentFont === "palatino" ||
+    raw.documentFont === "helvetica" ||
+    raw.documentFont === "computer-modern"
+      ? raw.documentFont
+      : undefined;
+
+  const fontSizePt =
+    typeof raw.fontSizePt === "number" && Number.isFinite(raw.fontSizePt)
+      ? Math.min(16, Math.max(9, raw.fontSizePt))
+      : undefined;
+
+  const lineStretch =
+    typeof raw.lineStretch === "number" && Number.isFinite(raw.lineStretch)
+      ? Math.min(1.6, Math.max(1, raw.lineStretch))
+      : undefined;
+
+  return { pageSize, documentFont, fontSizePt, lineStretch };
+}
 
 export function setupWebSocket(server: Server) {
   const wss = new WebSocketServer({ noServer: true });
@@ -22,17 +51,25 @@ export function setupWebSocket(server: Server) {
 
     let renderTimer: ReturnType<typeof setTimeout> | null = null;
     let isRendering = false;
-    let pendingContent: string | null = null;
+    let pendingRequest: { content: string; options: RenderOptions } | null = null;
+    let lastRequestedKey = "";
+    let lastRenderedKey = "";
 
-    async function doRender(content: string) {
+    async function doRender(content: string, options: RenderOptions) {
+      const key = `${content}:${JSON.stringify(options)}`;
+      if (key === lastRenderedKey) {
+        return;
+      }
+
       if (isRendering) {
-        pendingContent = content;
+        pendingRequest = { content, options };
         return;
       }
 
       isRendering = true;
       try {
-        const pdfBytes = await renderMarkdownToPdf(content);
+        const pdfBytes = await renderMarkdownToPdf(content, options);
+        lastRenderedKey = key;
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(pdfBytes, { binary: true });
         }
@@ -43,10 +80,10 @@ export function setupWebSocket(server: Server) {
         }
       } finally {
         isRendering = false;
-        if (pendingContent !== null) {
-          const next = pendingContent;
-          pendingContent = null;
-          doRender(next);
+        if (pendingRequest !== null) {
+          const next = pendingRequest;
+          pendingRequest = null;
+          doRender(next.content, next.options);
         }
       }
     }
@@ -55,10 +92,14 @@ export function setupWebSocket(server: Server) {
       try {
         const msg = JSON.parse(data.toString());
         if (msg.content !== undefined) {
+          const options = parseRenderOptions(msg.options);
+          const requestKey = `${msg.content}:${JSON.stringify(options)}`;
+          if (requestKey === lastRequestedKey) return;
+          lastRequestedKey = requestKey;
           if (renderTimer) clearTimeout(renderTimer);
           renderTimer = setTimeout(() => {
-            doRender(msg.content);
-          }, 100);
+            doRender(msg.content, options);
+          }, 140);
         }
       } catch {
         logger.warn("Invalid WebSocket message received");
