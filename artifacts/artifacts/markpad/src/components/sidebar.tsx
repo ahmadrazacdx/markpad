@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Folder, File, Plus, Trash2, Edit2, Check, X, FileText, Settings, Archive } from "lucide-react";
 import { useListProjects, useCreateProject, useDeleteProject, useUpdateProject, useListFiles, useCreateFile, useDeleteFile, useListTemplates, getListProjectsQueryKey, getListFilesQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 
 interface SidebarProps {
   projectId: number | null;
-  onProjectSelect: (id: number) => void;
+  onProjectSelect: (id: number | null) => void;
   selectedFile: string | null;
   onFileSelect: (path: string) => void;
 }
@@ -19,10 +19,34 @@ interface SidebarProps {
 export function Sidebar({ projectId, onProjectSelect, selectedFile, onFileSelect }: SidebarProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  const getErrorMessage = (error: unknown, fallback: string) => {
+    if (error && typeof error === "object" && "message" in error) {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === "string" && message.trim().length > 0) {
+        return message;
+      }
+    }
+    return fallback;
+  };
   
-  const { data: projects = [] } = useListProjects();
-  const { data: files = [] } = useListFiles(projectId as number, { query: { enabled: !!projectId, queryKey: getListFilesQueryKey(projectId as number) } });
-  const { data: templates = [] } = useListTemplates();
+  const projectsQuery = useListProjects();
+  const filesQuery = useListFiles(projectId as number, { query: { enabled: !!projectId, queryKey: getListFilesQueryKey(projectId as number) } });
+  const templatesQuery = useListTemplates();
+
+  const projects = Array.isArray(projectsQuery.data) ? projectsQuery.data : [];
+  const files = Array.isArray(filesQuery.data) ? filesQuery.data : [];
+  const templates = Array.isArray(templatesQuery.data) ? templatesQuery.data : [];
+
+  useEffect(() => {
+    if (!projectsQuery.error) return;
+    toast({ title: "Failed to load projects", variant: "destructive" });
+  }, [projectsQuery.error, toast]);
+
+  useEffect(() => {
+    if (!filesQuery.error) return;
+    toast({ title: "Failed to load files", variant: "destructive" });
+  }, [filesQuery.error, toast]);
 
   const createProject = useCreateProject();
   const deleteProject = useDeleteProject();
@@ -52,7 +76,7 @@ export function Sidebar({ projectId, onProjectSelect, selectedFile, onFileSelect
       onProjectSelect(proj.id);
       toast({ title: "Project created" });
     } catch (e) {
-      toast({ title: "Error creating project", variant: "destructive" });
+      toast({ title: getErrorMessage(e, "Error creating project"), variant: "destructive" });
     }
   };
 
@@ -80,7 +104,7 @@ export function Sidebar({ projectId, onProjectSelect, selectedFile, onFileSelect
     try {
       await deleteProject.mutateAsync({ projectId: id });
       queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
-      if (projectId === id) onProjectSelect(0);
+      if (projectId === id) onProjectSelect(null);
       toast({ title: "Project deleted" });
     } catch (err) {
       toast({ title: "Error deleting project", variant: "destructive" });

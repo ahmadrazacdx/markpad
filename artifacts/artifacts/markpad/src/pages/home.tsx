@@ -106,6 +106,7 @@ export default function Home() {
           <ResizablePanel defaultSize={40}>
             <PDFPreview 
               projectId={projectId} 
+              selectedFile={selectedFile}
               content={editorContent} 
               onStatusChange={setRenderStatus} 
             />

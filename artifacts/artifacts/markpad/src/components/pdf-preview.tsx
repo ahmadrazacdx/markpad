@@ -12,19 +12,33 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 interface PDFPreviewProps {
   projectId: number | null;
+  selectedFile: string | null;
   content: string;
   onStatusChange: (status: "Rendering..." | "Ready" | "Error") => void;
 }
 
-export function PDFPreview({ projectId, content, onStatusChange }: PDFPreviewProps) {
+export function PDFPreview({ projectId, selectedFile, content, onStatusChange }: PDFPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const latestPayloadRef = useRef<{ projectId: number | null; content: string }>({ projectId, content });
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    latestPayloadRef.current = { projectId, content };
+  }, [projectId, content]);
+
+  useEffect(() => {
+    if (!projectId || !selectedFile) {
+      setPdfData(null);
+      setError(null);
+      onStatusChange("Ready");
+    }
+  }, [projectId, selectedFile, onStatusChange]);
+
   // WebSocket connection
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !selectedFile) return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
@@ -35,13 +49,34 @@ export function PDFPreview({ projectId, content, onStatusChange }: PDFPreviewPro
 
     ws.onopen = () => {
       console.log("WebSocket connected for preview");
+      setError(null);
+      const payload = latestPayloadRef.current;
+      if (payload.projectId && selectedFile) {
+        onStatusChange("Rendering...");
+        ws.send(JSON.stringify({ projectId: payload.projectId, content: payload.content }));
+      }
     };
 
     ws.onmessage = async (event) => {
       if (event.data instanceof Blob) {
         const arrayBuffer = await event.data.arrayBuffer();
         setPdfData(new Uint8Array(arrayBuffer));
+        setError(null);
         onStatusChange("Ready");
+        return;
+      }
+
+      if (typeof event.data === "string") {
+        try {
+          const parsed = JSON.parse(event.data) as { error?: string };
+          if (parsed.error) {
+            setError(parsed.error);
+            onStatusChange("Error");
+          }
+        } catch {
+          setError(event.data || "Preview render failed");
+          onStatusChange("Error");
+        }
       }
     };
 
@@ -59,13 +94,14 @@ export function PDFPreview({ projectId, content, onStatusChange }: PDFPreviewPro
       ws.close();
       wsRef.current = null;
     };
-  }, [projectId, onStatusChange]);
+  }, [projectId, selectedFile, onStatusChange]);
 
   // Debounced send
   useEffect(() => {
-    if (!projectId || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!projectId || !selectedFile || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
     onStatusChange("Rendering...");
+    setError(null);
     const timeout = setTimeout(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ projectId, content }));
@@ -73,7 +109,7 @@ export function PDFPreview({ projectId, content, onStatusChange }: PDFPreviewPro
     }, 300);
 
     return () => clearTimeout(timeout);
-  }, [content, projectId, onStatusChange]);
+  }, [content, projectId, selectedFile, onStatusChange]);
 
   // Render PDF
   useEffect(() => {
@@ -128,10 +164,10 @@ export function PDFPreview({ projectId, content, onStatusChange }: PDFPreviewPro
     };
   }, [pdfData]);
 
-  if (!projectId) {
+  if (!projectId || !selectedFile) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground">
-        Select a project to view preview
+        {projectId ? "Select a file to view preview" : "Select a project to view preview"}
       </div>
     );
   }

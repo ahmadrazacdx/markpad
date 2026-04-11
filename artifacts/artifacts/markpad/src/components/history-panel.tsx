@@ -32,7 +32,11 @@ export function HistoryPanel({ open, onOpenChange, projectId, selectedFile }: Hi
     const label = prompt("Enter a label for this version:");
     if (!label) return;
     try {
-      await pinMutation.mutateAsync({ data: { label } });
+      await pinMutation.mutateAsync({
+        projectId: projectId as number,
+        snapshotId: id,
+        data: { label },
+      });
       queryClient.invalidateQueries({ queryKey: getGetHistoryQueryKey(projectId as number, { file: selectedFile as string }) });
       toast({ title: "Version pinned" });
     } catch (err) {
@@ -43,7 +47,11 @@ export function HistoryPanel({ open, onOpenChange, projectId, selectedFile }: Hi
   const handleRestore = async (id: number) => {
     if (!confirm("Are you sure you want to restore this version? Current unsaved changes will be lost.")) return;
     try {
-      await restoreMutation.mutateAsync(); // According to API schema, might need ID, check schema if needed. Let's assume it restores.
+      await restoreMutation.mutateAsync({
+        projectId: projectId as number,
+        snapshotId: id,
+      });
+      queryClient.invalidateQueries({ queryKey: getGetHistoryQueryKey(projectId as number, { file: selectedFile as string }) });
       toast({ title: "Version restored" });
       onOpenChange(false);
       // Invalidate file content

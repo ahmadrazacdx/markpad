@@ -2,7 +2,7 @@ import { FileDown, History, Moon, Sun, Save } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { useExportProject, useGetProjectStats, getGetProjectStatsQueryKey } from "@workspace/api-client-react";
+import { exportProject, useGetProjectStats, getGetProjectStatsQueryKey } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface TopBarProps {
@@ -23,10 +23,14 @@ export function TopBar({ projectId, selectedFile, onSave, onOpenHistory }: TopBa
   const handleExport = async (format: "pdf" | "md" | "latex") => {
     if (!projectId) return;
     try {
-      // Assuming exportProject returns a blob or URL, though the api spec might differ.
-      // For this UI, we just simulate triggering the export or let the user know.
-      toast({ title: `Exporting as ${format.toUpperCase()}...` });
-      // In a real app, we'd trigger the download here
+      const blob = await exportProject(projectId, { format, file: selectedFile ?? undefined });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = `${selectedFile?.replace(/\.md$/, "") || "markpad"}.${format === "latex" ? "tex" : format}`;
+      anchor.click();
+      URL.revokeObjectURL(objectUrl);
+      toast({ title: `Exported as ${format.toUpperCase()}` });
     } catch (err) {
       toast({ title: "Export failed", variant: "destructive" });
     }
