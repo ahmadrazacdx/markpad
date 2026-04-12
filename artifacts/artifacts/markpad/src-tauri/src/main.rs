@@ -186,6 +186,8 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
         &["bin", "resources/bin"],
         "Bundled binary directory",
     )?;
+    let pandoc_bin = bundled_bin_dir.join(platform_executable("pandoc"));
+    let typst_bin = bundled_bin_dir.join(platform_executable("typst"));
 
     if !node_bin.exists() {
         return Err(format!("Bundled Node runtime not found: {}", node_bin.display()));
@@ -193,6 +195,14 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
 
     if !backend_entry.exists() {
         return Err(format!("Bundled backend entry not found: {}", backend_entry.display()));
+    }
+
+    if !pandoc_bin.exists() {
+        return Err(format!("Bundled pandoc binary not found: {}", pandoc_bin.display()));
+    }
+
+    if !typst_bin.exists() {
+        return Err(format!("Bundled typst binary not found: {}", typst_bin.display()));
     }
 
     let app_data_dir = resolve_app_data_dir(app)?;
@@ -223,6 +233,8 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
         .env("PORT", port.to_string())
         .env("NODE_ENV", "production")
         .env("MARKPAD_DATA_DIR", &app_data_dir)
+        .env("MARKPAD_PANDOC_BIN", &pandoc_bin)
+        .env("MARKPAD_TYPST_BIN", &typst_bin)
         .env("PATH", merged_path)
         .stdout(Stdio::from(backend_log_file))
         .stderr(Stdio::from(backend_log_err_file));

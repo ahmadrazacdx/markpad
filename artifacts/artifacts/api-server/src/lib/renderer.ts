@@ -169,10 +169,41 @@ function normalizeMarkdownForPdf(markdown: string): string {
   return normalized.join("\n");
 }
 
+function resolvePandocBinary(): string {
+  const configured = process.env.MARKPAD_PANDOC_BIN?.trim();
+  return configured && configured.length > 0 ? configured : "pandoc";
+}
+
+function resolvePdfEngineBinary(engine: "typst" | "latex"): string {
+  if (engine === "latex") {
+    return "pdflatex";
+  }
+
+  const configured = process.env.MARKPAD_TYPST_BIN?.trim();
+  if (configured && configured.length > 0) {
+    return configured;
+  }
+
+  return process.platform === "win32" ? "typst.exe" : "typst";
+}
+
+function summarizeRenderError(engine: "typst" | "latex", error: Error, stdout: string, stderr: string): Error {
+  const chunks = [
+    stderr?.trim(),
+    stdout?.trim(),
+    error.message,
+  ].filter((value): value is string => Boolean(value && value.trim().length > 0));
+
+  const details = chunks.join("\n");
+  return new Error(`${engine.toUpperCase()} render failed: ${details}`);
+}
+
 async function runPandocToPdf(markdown: string, pdfFile: string, engine: "typst" | "latex", options: Required<RenderOptions>) {
   const templateFile = engine === "latex" ? join(tmpDir, `${randomBytes(8).toString("hex")}.template.tex`) : null;
   const fromArgs = engine === "latex" ? ["--from=markdown+raw_tex"] : [];
-  const engineArgs = engine === "latex" ? ["--pdf-engine=pdflatex"] : ["--pdf-engine=typst"];
+  const pandocBin = resolvePandocBinary();
+  const engineBinary = resolvePdfEngineBinary(engine);
+  const engineArgs = [`--pdf-engine=${engineBinary}`];
   const templateArgs = templateFile ? ["--template", templateFile] : [];
   const pageSizeArg = engine === "typst" ? ["-V", `papersize=${options.pageSize}`] : [];
   const typstLayoutArgs = engine === "typst"
@@ -186,12 +217,12 @@ async function runPandocToPdf(markdown: string, pdfFile: string, engine: "typst"
 
     await new Promise<void>((resolve, reject) => {
       execFile(
-        "pandoc",
+        pandocBin,
         ["-", ...fromArgs, ...engineArgs, ...pageSizeArg, ...typstLayoutArgs, ...templateArgs, "-o", pdfFile, "--standalone"],
         { timeout: 15000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
-        (error, _stdout, stderr) => {
+        (error, stdout, stderr) => {
           if (error) {
-            reject(new Error(`${engine.toUpperCase()} render failed: ${stderr || error.message}`));
+            reject(summarizeRenderError(engine, error, stdout, stderr));
           } else {
             resolve();
           }
@@ -274,6 +305,7 @@ export function prewarmPdfRenderer() {
 export async function renderMarkdownToLatex(markdown: string, rawOptions?: RenderOptions): Promise<string> {
   const options: Required<RenderOptions> = { ...DEFAULT_RENDER_OPTIONS, ...(rawOptions ?? {}) };
   const normalizedMarkdown = normalizeMarkdownForPdf(markdown);
+  const pandocBin = resolvePandocBinary();
   await ensureTmpDir();
   const id = randomBytes(8).toString("hex");
   const mdFile = join(tmpDir, `${id}.md`);
@@ -286,12 +318,12 @@ export async function renderMarkdownToLatex(markdown: string, rawOptions?: Rende
 
     await new Promise<void>((resolve, reject) => {
       execFile(
-        "pandoc",
+        pandocBin,
         [mdFile, "--from=markdown+raw_tex", "--to=latex", "--wrap=none", "--template", templateFile, "-o", texFile],
         { timeout: 15000, windowsHide: true },
-        (error, _stdout, stderr) => {
+        (error, stdout, stderr) => {
           if (error) {
-            reject(new Error(`Pandoc failed: ${stderr || error.message}`));
+            reject(new Error(`Pandoc failed: ${[stderr?.trim(), stdout?.trim(), error.message].filter(Boolean).join("\n")}`));
           } else {
             resolve();
           }

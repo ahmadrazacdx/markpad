@@ -170,9 +170,22 @@ jobs:
 
           $resourceRoot = "artifacts/artifacts/markpad/src-tauri/resources"
           $nodeExe = Join-Path $resourceRoot "runtime/node/node.exe"
+          $pandocExe = Join-Path $resourceRoot "bin/pandoc.exe"
+          $typstExe = Join-Path $resourceRoot "bin/typst.exe"
           $backendEntry = "artifacts/artifacts/markpad/src-tauri/resources/backend/dist/index.mjs"
           $dataDir = Join-Path $env:RUNNER_TEMP "markpad-data"
           New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+
+          if (-not (Test-Path $pandocExe)) {
+            throw "pandoc executable missing at $pandocExe"
+          }
+
+          if (-not (Test-Path $typstExe)) {
+            throw "typst executable missing at $typstExe"
+          }
+
+          & $pandocExe --version | Select-Object -First 1 | Write-Host
+          & $typstExe --version | Write-Host
 
           $server = $null
           try {
@@ -180,6 +193,8 @@ jobs:
               PORT = "18080"
               NODE_ENV = "production"
               MARKPAD_DATA_DIR = $dataDir
+              MARKPAD_PANDOC_BIN = $pandocExe
+              MARKPAD_TYPST_BIN = $typstExe
               PATH = "$resourceRoot/bin;$resourceRoot/runtime/node;$env:PATH"
             }
 
