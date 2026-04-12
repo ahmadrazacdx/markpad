@@ -181,18 +181,23 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
 
 fn stop_backend(app: &tauri::AppHandle) {
     let state = app.state::<BackendState>();
-    let mut guard = match state.child.lock() {
+    let mut child_guard = match state.child.lock() {
         Ok(guard) => guard,
         Err(_) => return,
     };
 
-    if let Some(mut child) = guard.take() {
+    if let Some(mut child) = child_guard.take() {
         let _ = child.kill();
     }
 
-    if let Ok(mut port_guard) = state.port.lock() {
-        *port_guard = 0;
-    }
+    drop(child_guard);
+
+    match state.port.lock() {
+        Ok(mut port_guard) => {
+            *port_guard = 0;
+        }
+        Err(_) => {}
+    };
 }
 
 fn main() {
