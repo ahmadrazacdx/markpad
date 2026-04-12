@@ -15,8 +15,8 @@
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
-    "@tauri-apps/cli": "^2.8.0",
-    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/cli": "~2.2.0",
+    "@tauri-apps/api": "~2.2.0",
     "@codemirror/autocomplete": "^6.20.1",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-markdown": "^6.5.0",
