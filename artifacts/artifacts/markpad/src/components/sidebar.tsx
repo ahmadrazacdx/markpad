@@ -1,5 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Trash2, Edit2, Check, X, ChevronDown, Upload, ArrowLeft, PanelLeftClose, Settings2 } from "lucide-react";
+import {
+  Trash2,
+  Edit2,
+  Check,
+  X,
+  ChevronDown,
+  Upload,
+  ArrowLeft,
+  PanelLeftClose,
+  Settings2,
+  Folder as FolderGlyph,
+  FileText,
+  FileCode2,
+  Image as ImageGlyph,
+  File as FileGlyph,
+  PlusCircle,
+  LayoutGrid,
+} from "lucide-react";
 import { useListProjects, useCreateProject, useDeleteProject, useUpdateProject, useListFiles, useCreateFile, useDeleteFile, useListTemplates, getListProjectsQueryKey, getListFilesQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -45,62 +62,42 @@ function colorFromName(name: string) {
   return palette[Math.abs(hash) % palette.length];
 }
 
-function toMaterialIcon(path: string, type: "file" | "directory") {
-  if (type === "directory") return "folder";
+function FileTypeIcon({ path, type, size = 16, className = "" }: { path: string; type: "file" | "directory"; size?: number; className?: string }) {
+  const classes = `${className} leading-none`;
+  if (type === "directory") {
+    return <FolderGlyph className={classes} style={{ width: size, height: size }} aria-hidden />;
+  }
+
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  if (ext === "md") return "description";
-  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) return "image";
-  if (ext === "pdf") return "picture_as_pdf";
-  if (["ts", "tsx", "js", "jsx", "json", "yaml", "yml"].includes(ext)) return "code";
-  return "draft";
+  if (ext === "md") {
+    return <FileText className={classes} style={{ width: size, height: size, color: "#0078d4" }} aria-hidden />;
+  }
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) {
+    return <ImageGlyph className={classes} style={{ width: size, height: size }} aria-hidden />;
+  }
+  if (ext === "pdf") {
+    return <FileText className={classes} style={{ width: size, height: size }} aria-hidden />;
+  }
+  if (["ts", "tsx", "js", "jsx", "json", "yaml", "yml"].includes(ext)) {
+    return <FileCode2 className={classes} style={{ width: size, height: size }} aria-hidden />;
+  }
+  return <FileGlyph className={classes} style={{ width: size, height: size }} aria-hidden />;
 }
 
 function MarkdownIcon() {
-  return (
-    <span className="material-symbols-rounded text-[16px] leading-none text-[#0078d4]" aria-hidden>
-      markdown
-    </span>
-  );
+  return <FileText className="h-4 w-4 leading-none text-[#0078d4]" aria-hidden />;
 }
 
 function AddActionIcon() {
-  return (
-    <span
-      className="material-symbols-rounded text-[18px] leading-none text-sky-500"
-      style={{ fontVariationSettings: '"FILL" 1, "wght" 500, "GRAD" 0, "opsz" 20' }}
-      aria-hidden
-    >
-      add_circle
-    </span>
-  );
+  return <PlusCircle className="h-[18px] w-[18px] leading-none text-sky-500" aria-hidden />;
 }
 
 function ProjectsIcon() {
-  return (
-    <span
-      className="material-symbols-rounded text-[17px] leading-none text-sky-500"
-      style={{ fontVariationSettings: '"FILL" 1, "wght" 550, "GRAD" 0, "opsz" 20' }}
-      aria-hidden
-    >
-      workspaces
-    </span>
-  );
+  return <LayoutGrid className="h-[17px] w-[17px] leading-none text-sky-500" aria-hidden />;
 }
 
 function FolderIcon({ color = "#f59e0b", size = 16, className = "" }: { color?: string; size?: number; className?: string }) {
-  return (
-    <span
-      className={`material-symbols-rounded leading-none ${className}`}
-      style={{
-        color,
-        fontSize: `${size}px`,
-        fontVariationSettings: '"FILL" 1, "wght" 520, "GRAD" 0, "opsz" 20',
-      }}
-      aria-hidden
-    >
-      folder
-    </span>
-  );
+  return <FolderGlyph className={`leading-none ${className}`} style={{ color, width: size, height: size }} aria-hidden />;
 }
 
 export function Sidebar({ onToggleCollapse, projectId, preferences, onPreferencesChange, onProjectSelect, selectedFile, onFileSelect }: SidebarProps) {
@@ -1000,9 +997,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
                   {entry.type === "directory" ? (
                     <FolderIcon color="#f59e0b" size={14} className="transition-transform group-hover:scale-110" />
                   ) : (
-                    <span className="material-symbols-rounded text-[14px] leading-none text-muted-foreground" aria-hidden>
-                      {toMaterialIcon(entry.path, entry.type)}
-                    </span>
+                    <FileTypeIcon path={entry.path} type={entry.type} size={14} className="text-muted-foreground" />
                   )}
                   {renamingAssetPath === entry.path ? (
                     <>
@@ -1063,9 +1058,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
               {f.path.endsWith(".md") ? (
                 <MarkdownIcon />
               ) : (
-                <span className="material-symbols-rounded text-[16px] leading-none text-muted-foreground" aria-hidden>
-                  {toMaterialIcon(f.path, f.type)}
-                </span>
+                <FileTypeIcon path={f.path} type={f.type} size={16} className="text-muted-foreground" />
               )}
 
               {renamingFilePath === f.path ? (

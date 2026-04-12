@@ -1,33 +1,60 @@
 import { setBaseUrl } from "@workspace/api-client-react";
 
 const DEFAULT_DEV_API_PORT = 8080;
+const DEFAULT_DESKTOP_API_PORT = 18080;
+const BACKEND_PORT_DISCOVERY_ATTEMPTS = 8;
+const BACKEND_PORT_DISCOVERY_DELAY_MS = 80;
 
 let resolvedApiBaseUrl: string | null = null;
 let initialized = false;
 
-function isDesktopRuntime() {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+function delay(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function resolveDesktopApiBaseUrl(): Promise<string | null> {
-  if (!isDesktopRuntime()) return null;
+function looksLikeDesktopRuntime() {
+  if (typeof window === "undefined") return false;
+  if (window.location.protocol === "tauri:") return true;
+  if (/\bTauri\b/i.test(window.navigator.userAgent)) return true;
+  return false;
+}
 
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const port = await invoke<number>("get_backend_port");
+async function readBackendPortFromTauri() {
+  const { invoke, isTauri } = await import("@tauri-apps/api/core");
 
-    if (Number.isInteger(port) && port > 0) {
-      return `http://127.0.0.1:${port}`;
+  for (let attempt = 0; attempt < BACKEND_PORT_DISCOVERY_ATTEMPTS; attempt += 1) {
+    if (isTauri()) {
+      try {
+        const port = await invoke<number>("get_backend_port");
+        if (Number.isInteger(port) && port > 0) {
+          return port;
+        }
+      } catch {
+        // Keep trying briefly while desktop runtime initializes.
+      }
     }
-  } catch {
-    // Fall through to default behavior below.
-  }
 
-  if (import.meta.env.DEV) {
-    return `http://127.0.0.1:${DEFAULT_DEV_API_PORT}`;
+    if (attempt < BACKEND_PORT_DISCOVERY_ATTEMPTS - 1) {
+      await delay(BACKEND_PORT_DISCOVERY_DELAY_MS);
+    }
   }
 
   return null;
+}
+
+async function resolveDesktopApiBaseUrl() {
+  if (!looksLikeDesktopRuntime()) return null;
+
+  try {
+    const discoveredPort = await readBackendPortFromTauri();
+    if (discoveredPort) {
+      return `http://127.0.0.1:${discoveredPort}`;
+    }
+  } catch {
+    // Fall through to deterministic desktop fallback.
+  }
+
+  return `http://127.0.0.1:${DEFAULT_DESKTOP_API_PORT}`;
 }
 
 function normalizeApiPath(path: string) {
@@ -62,6 +89,9 @@ export async function initializeApiBaseUrl() {
   }
 
   resolvedApiBaseUrl = await resolveDesktopApiBaseUrl();
+  if (!resolvedApiBaseUrl && import.meta.env.DEV) {
+    resolvedApiBaseUrl = `http://127.0.0.1:${DEFAULT_DEV_API_PORT}`;
+  }
   setBaseUrl(resolvedApiBaseUrl);
   initialized = true;
   return resolvedApiBaseUrl;

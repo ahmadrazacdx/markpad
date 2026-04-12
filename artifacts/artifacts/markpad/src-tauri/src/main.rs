@@ -3,6 +3,7 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+use std::fs::OpenOptions;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -153,6 +154,16 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
     fs::create_dir_all(&app_data_dir)
         .map_err(|e| format!("Failed to create app data dir {}: {e}", app_data_dir.display()))?;
 
+    let backend_log_path = app_data_dir.join("backend.log");
+    let backend_log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&backend_log_path)
+        .map_err(|e| format!("Failed to open backend log {}: {e}", backend_log_path.display()))?;
+    let backend_log_err_file = backend_log_file
+        .try_clone()
+        .map_err(|e| format!("Failed to clone backend log handle {}: {e}", backend_log_path.display()))?;
+
     let current_path = env::var_os("PATH").unwrap_or_else(OsString::new);
     let mut merged_path = OsString::new();
     merged_path.push(bundled_bin_dir.as_os_str());
@@ -171,8 +182,8 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
         .env("NODE_ENV", "production")
         .env("MARKPAD_DATA_DIR", &app_data_dir)
         .env("PATH", merged_path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(Stdio::from(backend_log_file))
+        .stderr(Stdio::from(backend_log_err_file));
 
     command
         .spawn()

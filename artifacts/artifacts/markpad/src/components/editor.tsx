@@ -3,7 +3,6 @@ import { EditorState, Prec, type Range } from "@codemirror/state";
 import { Decoration, EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { languages } from "@codemirror/language-data";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { useTheme } from "next-themes";
@@ -252,7 +251,6 @@ export function Editor({ value, onChange, onSave, fontFamily = "space-mono", fon
       customKeymap,
       markdown({
         base: markdownLanguage,
-        codeLanguages: languages,
       }),
       Prec.high(frontmatterHighlight),
       syntaxHighlighting(
