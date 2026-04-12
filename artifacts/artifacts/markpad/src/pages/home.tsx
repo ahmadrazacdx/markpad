@@ -16,6 +16,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { AppPreferences, defaultPreferences } from "@/lib/preferences";
+import { apiUrl } from "@/lib/runtime-api";
 
 export default function Home() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -73,7 +74,7 @@ export default function Home() {
           data: { content },
         });
       } else {
-        const response = await fetch(`/api/projects/${projectId}/files/${encodeURIComponent(selectedFile)}?checkpoint=false`, {
+        const response = await fetch(apiUrl(`/api/projects/${projectId}/files/${encodeURIComponent(selectedFile)}?checkpoint=false`), {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content }),

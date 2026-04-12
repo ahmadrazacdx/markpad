@@ -1,8 +1,11 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
-import { setBaseUrl } from "@workspace/api-client-react";
+import { initializeApiBaseUrl } from "@/lib/runtime-api";
 
-setBaseUrl(import.meta.env.VITE_API_BASE_URL ?? null);
+async function bootstrap() {
+  await initializeApiBaseUrl();
+  createRoot(document.getElementById("root")!).render(<App />);
+}
 
-createRoot(document.getElementById("root")!).render(<App />);
+void bootstrap();

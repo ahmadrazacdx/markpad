@@ -3,14 +3,75 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use tauri::Manager;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+const DEFAULT_BACKEND_PORT: u16 = 18080;
+const BACKEND_PORT_SCAN_LIMIT: u16 = 120;
 
 #[derive(Default)]
 struct BackendState {
     child: Mutex<Option<Child>>,
+    port: Mutex<u16>,
+}
+
+#[tauri::command]
+fn get_backend_port(state: tauri::State<'_, BackendState>) -> Result<u16, String> {
+    let guard = state
+        .port
+        .lock()
+        .map_err(|_| "Backend port state lock poisoned".to_string())?;
+
+    if *guard > 0 {
+        return Ok(*guard);
+    }
+
+    if cfg!(debug_assertions) {
+        return Ok(8080);
+    }
+
+    Err("Backend port is not available".to_string())
+}
+
+fn is_port_available(port: u16) -> bool {
+    TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+fn select_backend_port() -> Result<u16, String> {
+    let preferred_port = env::var("MARKPAD_BACKEND_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(DEFAULT_BACKEND_PORT);
+
+    if is_port_available(preferred_port) {
+        return Ok(preferred_port);
+    }
+
+    for offset in 1..=BACKEND_PORT_SCAN_LIMIT {
+        let candidate = preferred_port.saturating_add(offset);
+        if candidate > 0 && is_port_available(candidate) {
+            return Ok(candidate);
+        }
+    }
+
+    let fallback_listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("Failed to allocate fallback backend port: {e}"))?;
+    let fallback_port = fallback_listener
+        .local_addr()
+        .map_err(|e| format!("Failed to read fallback backend port: {e}"))?
+        .port();
+    drop(fallback_listener);
+
+    Ok(fallback_port)
 }
 
 fn platform_executable(name: &str) -> String {
@@ -58,7 +119,7 @@ fn resolve_existing_resource_path(
     ))
 }
 
-fn spawn_backend(app: &tauri::AppHandle) -> Result<Child, String> {
+fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
     let node_dir = resolve_existing_resource_path(
         app,
         &["runtime/node", "resources/runtime/node"],
@@ -101,9 +162,12 @@ fn spawn_backend(app: &tauri::AppHandle) -> Result<Child, String> {
     merged_path.push(current_path);
 
     let mut command = Command::new(node_bin);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
     command
         .arg(backend_entry)
-        .env("PORT", "18080")
+        .env("PORT", port.to_string())
         .env("NODE_ENV", "production")
         .env("MARKPAD_DATA_DIR", &app_data_dir)
         .env("PATH", merged_path)
@@ -125,14 +189,22 @@ fn stop_backend(app: &tauri::AppHandle) {
     if let Some(mut child) = guard.take() {
         let _ = child.kill();
     }
+
+    if let Ok(mut port_guard) = state.port.lock() {
+        *port_guard = 0;
+    }
 }
 
 fn main() {
     tauri::Builder::default()
         .manage(BackendState::default())
+        .invoke_handler(tauri::generate_handler![get_backend_port])
         .setup(|app| {
             if !cfg!(debug_assertions) {
-                let child = spawn_backend(&app.handle())
+                let backend_port = select_backend_port()
+                    .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+
+                let child = spawn_backend(&app.handle(), backend_port)
                     .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
 
                 let state = app.state::<BackendState>();
@@ -141,6 +213,12 @@ fn main() {
                     .lock()
                     .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Backend state lock poisoned"))?;
                 *guard = Some(child);
+
+                let mut port_guard = state
+                    .port
+                    .lock()
+                    .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Backend port lock poisoned"))?;
+                *port_guard = backend_port;
             }
 
             Ok(())

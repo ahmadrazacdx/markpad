@@ -13,6 +13,7 @@ const requireFromApp = createRequire(import.meta.url);
 
 const libsqlNativePackageByPlatform = {
   win32: {
+    arm64: "@libsql/win32-x64-msvc",
     x64: "@libsql/win32-x64-msvc",
   },
   linux: {
@@ -47,19 +48,15 @@ await mkdir(backendResourceDir, { recursive: true });
 await cp(apiServerDistDir, backendResourceDir, { recursive: true });
 
 const libsqlNativePackage = libsqlNativePackageByPlatform[process.platform]?.[process.arch];
-if (libsqlNativePackage) {
-  const copied = await copyPackageToBackendNodeModules(libsqlNativePackage);
-  if (copied) {
-    console.log(`Copied ${libsqlNativePackage} into desktop backend resources`);
-  } else {
-    console.warn(
-      `${libsqlNativePackage} is not installed in this environment; backend may require it at runtime`,
-    );
-  }
-} else {
-  console.warn(
-    `No libsql native package mapping for ${process.platform}/${process.arch}; skipping copy`,
-  );
+if (!libsqlNativePackage) {
+  throw new Error(`No libsql native package mapping for ${process.platform}/${process.arch}`);
 }
+
+const copied = await copyPackageToBackendNodeModules(libsqlNativePackage);
+if (!copied) {
+  throw new Error(`${libsqlNativePackage} is not installed in this environment`);
+}
+
+console.log(`Copied ${libsqlNativePackage} into desktop backend resources`);
 
 console.log(`Desktop resources staged at: ${backendResourceDir}`);

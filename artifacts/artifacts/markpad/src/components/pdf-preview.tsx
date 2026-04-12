@@ -4,6 +4,7 @@ import "pdfjs-dist/build/pdf.worker.mjs";
 import { Loader2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AppPreferences } from "@/lib/preferences";
+import { getApiBaseUrl } from "@/lib/runtime-api";
 
 // Set worker src
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -51,10 +52,10 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
   const [error, setError] = useState<string | null>(null);
 
   const resolvePreviewWebSocketUrl = () => {
-    const explicitApiBase = import.meta.env.VITE_API_BASE_URL;
+    const apiBaseUrl = getApiBaseUrl();
 
-    if (explicitApiBase) {
-      const url = new URL("/api/ws/preview", explicitApiBase);
+    if (apiBaseUrl) {
+      const url = new URL("/api/ws/preview", apiBaseUrl);
       url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
       return url.toString();
     }

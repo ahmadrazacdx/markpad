@@ -14,6 +14,7 @@ import {
   EDITOR_FONT_OPTIONS,
   PAGE_SIZE_OPTIONS,
 } from "@/lib/preferences";
+import { apiUrl } from "@/lib/runtime-api";
 
 interface SidebarProps {
   onToggleCollapse: () => void;
@@ -338,7 +339,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
     });
 
     try {
-      const response = await fetch(`/api/projects/${projectId}/assets/folders`, {
+      const response = await fetch(apiUrl(`/api/projects/${projectId}/assets/folders`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: folderPath }),
@@ -382,7 +383,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
         });
 
         try {
-            const response = await fetch(`/api/projects/${projectId}/assets/upload`, {
+            const response = await fetch(apiUrl(`/api/projects/${projectId}/assets/upload`), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -490,7 +491,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
     setRenamingAssetPath(null);
 
     try {
-      const response = await fetch(`/api/projects/${projectId}/assets/rename`, {
+      const response = await fetch(apiUrl(`/api/projects/${projectId}/assets/rename`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fromPath: oldPath, toPath: newPath }),
@@ -596,7 +597,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
     setRenamingFilePath(null);
 
     try {
-      const response = await fetch(`/api/projects/${projectId}/files/rename`, {
+      const response = await fetch(apiUrl(`/api/projects/${projectId}/files/rename`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fromPath: oldPath, toPath: newPath }),

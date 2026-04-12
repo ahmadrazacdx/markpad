@@ -11,6 +11,22 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            rust_target: x86_64-pc-windows-msvc
+            libsql_pkg: '@libsql/win32-x64-msvc'
+            node_arch: x64
+            pandoc_asset: pandoc-3.6.4-windows-x86_64.zip
+            typst_asset: typst-x86_64-pc-windows-msvc.zip
+          - arch: arm64
+            rust_target: aarch64-pc-windows-msvc
+            libsql_pkg: '@libsql/win32-x64-msvc'
+            node_arch: x64
+            pandoc_asset: pandoc-3.6.4-windows-arm64.zip
+            typst_asset: typst-aarch64-pc-windows-msvc.zip
     permissions:
       contents: write
 
@@ -31,6 +47,8 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -44,12 +62,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $pkg = "@libsql/win32-x64-msvc"
+          $pkg = "${{ matrix.libsql_pkg }}"
           $ver = "0.5.29"
 
           $resolved = ""
           try {
-            $resolved = node -e "console.log(require.resolve('@libsql/win32-x64-msvc/package.json'))"
+            $resolved = node -e "console.log(require.resolve('$pkg/package.json'))"
           } catch {
           }
 
@@ -57,7 +75,7 @@ jobs:
             Write-Host "$pkg missing; installing deterministic fallback version $ver"
             pnpm add -Dw "$pkg@$ver" --save-exact
             try {
-              $resolved = node -e "console.log(require.resolve('@libsql/win32-x64-msvc/package.json'))"
+              $resolved = node -e "console.log(require.resolve('$pkg/package.json'))"
             } catch {
               $resolved = ""
             }
@@ -96,25 +114,56 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$resourceRoot/runtime" | Out-Null
           New-Item -ItemType Directory -Force -Path "$resourceRoot/bin" | Out-Null
 
-          $nodePath = (Get-Command node).Source
-          $nodeDir = Split-Path $nodePath -Parent
-          Copy-Item $nodeDir "$resourceRoot/runtime/node" -Recurse -Force
+          $nodeVersion = (node -p "process.version").Trim().TrimStart("v")
+          $nodeArch = "${{ matrix.node_arch }}"
+          $nodeUrl = "https://nodejs.org/dist/v$nodeVersion/node-v$nodeVersion-win-$nodeArch.zip"
+          $nodeZip = "$env:RUNNER_TEMP/node-$nodeArch.zip"
+          Invoke-WebRequest $nodeUrl -OutFile $nodeZip
+          Expand-Archive -Path $nodeZip -DestinationPath "$env:RUNNER_TEMP/node-$nodeArch" -Force
+          $nodeDir = Get-ChildItem "$env:RUNNER_TEMP/node-$nodeArch" -Directory | Where-Object { $_.Name -like "node-v*-win-$nodeArch" } | Select-Object -First 1
+          if (-not $nodeDir) { throw "Node runtime directory not found for $nodeArch" }
+          Copy-Item $nodeDir.FullName "$resourceRoot/runtime/node" -Recurse -Force
+
+          function Download-WithFallback {
+            param(
+              [string]$PrimaryUrl,
+              [string]$FallbackUrl,
+              [string]$OutFile
+            )
+
+            try {
+              Invoke-WebRequest $PrimaryUrl -OutFile $OutFile
+            } catch {
+              if (-not $FallbackUrl) {
+                throw
+              }
+
+              Write-Warning "Primary download failed: $PrimaryUrl"
+              Write-Host "Falling back to: $FallbackUrl"
+              Invoke-WebRequest $FallbackUrl -OutFile $OutFile
+            }
+          }
 
           $pandocZip = "$env:RUNNER_TEMP/pandoc.zip"
-          Invoke-WebRequest "https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-windows-x86_64.zip" -OutFile $pandocZip
+          $pandocPrimary = "https://github.com/jgm/pandoc/releases/download/3.6.4/${{ matrix.pandoc_asset }}"
+          $pandocFallback = "https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-windows-x86_64.zip"
+          Download-WithFallback -PrimaryUrl $pandocPrimary -FallbackUrl $pandocFallback -OutFile $pandocZip
           Expand-Archive -Path $pandocZip -DestinationPath "$env:RUNNER_TEMP/pandoc" -Force
           $pandocExe = Get-ChildItem "$env:RUNNER_TEMP/pandoc" -Recurse -Filter pandoc.exe | Select-Object -First 1
           if (-not $pandocExe) { throw "pandoc.exe not found in archive" }
           Copy-Item $pandocExe.FullName "$resourceRoot/bin/pandoc.exe" -Force
 
           $typstZip = "$env:RUNNER_TEMP/typst.zip"
-          Invoke-WebRequest "https://github.com/typst/typst/releases/download/v0.13.1/typst-x86_64-pc-windows-msvc.zip" -OutFile $typstZip
+          $typstPrimary = "https://github.com/typst/typst/releases/download/v0.13.1/${{ matrix.typst_asset }}"
+          $typstFallback = "https://github.com/typst/typst/releases/download/v0.13.1/typst-x86_64-pc-windows-msvc.zip"
+          Download-WithFallback -PrimaryUrl $typstPrimary -FallbackUrl $typstFallback -OutFile $typstZip
           Expand-Archive -Path $typstZip -DestinationPath "$env:RUNNER_TEMP/typst" -Force
           $typstExe = Get-ChildItem "$env:RUNNER_TEMP/typst" -Recurse -Filter typst.exe | Select-Object -First 1
           if (-not $typstExe) { throw "typst.exe not found in archive" }
           Copy-Item $typstExe.FullName "$resourceRoot/bin/typst.exe" -Force
 
       - name: Smoke test backend health + WebSocket preview
+        if: matrix.arch == 'x64'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -226,15 +275,15 @@ jobs:
           Write-Host "Tauri resource validation passed"
 
       - name: Build NSIS installer (.exe)
-        run: pnpm --filter @workspace/markpad run tauri:build:windows
+        run: pnpm --filter @workspace/markpad exec tauri build --config src-tauri/tauri.conf.json --bundles nsis --target ${{ matrix.rust_target }}
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: markpad-windows-installer-${{ github.sha }}
+          name: markpad-windows-installer-${{ matrix.arch }}-${{ github.sha }}
           path: |
-            artifacts/artifacts/markpad/src-tauri/target/release/bundle/nsis/*.exe
-            artifacts/artifacts/markpad/src-tauri/target/release/bundle/nsis/*.zip
+            artifacts/artifacts/markpad/src-tauri/target/${{ matrix.rust_target }}/release/bundle/nsis/*.exe
+            artifacts/artifacts/markpad/src-tauri/target/${{ matrix.rust_target }}/release/bundle/nsis/*.zip
           if-no-files-found: error
 
       - name: Publish GitHub Release (tags only)
@@ -244,5 +293,5 @@ jobs:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            artifacts/artifacts/markpad/src-tauri/target/release/bundle/nsis/*.exe
+            artifacts/artifacts/markpad/src-tauri/target/${{ matrix.rust_target }}/release/bundle/nsis/*.exe
           fail_on_unmatched_files: true

@@ -6,6 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useGetProjectStats, getGetProjectStatsQueryKey } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { AppPreferences } from "@/lib/preferences";
+import { apiUrl } from "@/lib/runtime-api";
 
 interface TopBarProps {
   projectId: number | null;
@@ -57,7 +58,7 @@ export function TopBar({ projectId, selectedFile, content, preferences, onSave, 
         ? `/api/projects/${projectId}/render`
         : `/api/projects/${projectId}/export/latex`;
 
-      const response = await fetch(endpoint, {
+      const response = await fetch(apiUrl(endpoint), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
