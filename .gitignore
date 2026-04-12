@@ -47,3 +47,8 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# MarkPad desktop generated resources
+artifacts/artifacts/markpad/src-tauri/resources/backend/
+artifacts/artifacts/markpad/src-tauri/resources/runtime/
+artifacts/artifacts/markpad/src-tauri/resources/bin/

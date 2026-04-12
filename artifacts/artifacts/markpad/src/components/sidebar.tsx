@@ -57,6 +57,30 @@ const FALLBACK_TEMPLATES: Array<{ id: string; name: string }> = [
   { id: "letter", name: "Letter" },
 ];
 
+function normalizeTemplates(input: unknown) {
+  if (!Array.isArray(input)) return FALLBACK_TEMPLATES;
+
+  const normalized = input
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+
+      const maybeId = "id" in item ? (item as { id?: unknown }).id : undefined;
+      const maybeName = "name" in item ? (item as { name?: unknown }).name : undefined;
+
+      if (typeof maybeId !== "string" || maybeId.trim().length === 0) return null;
+      if (typeof maybeName !== "string" || maybeName.trim().length === 0) return null;
+
+      return {
+        ...(item as Record<string, unknown>),
+        id: maybeId,
+        name: maybeName,
+      };
+    })
+    .filter((item): item is { id: string; name: string } => item !== null);
+
+  return normalized.length > 0 ? normalized : FALLBACK_TEMPLATES;
+}
+
 function normalizeAssetPath(path: string) {
   const trimmed = path.trim().replace(/^\/+/, "");
   return trimmed.startsWith("assets/") ? trimmed : `assets/${trimmed}`;
@@ -142,9 +166,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
 
   const projects = Array.isArray(projectsQuery.data) ? projectsQuery.data : [];
   const files = (Array.isArray(filesQuery.data) ? filesQuery.data : []) as FileEntry[];
-  const templates = Array.isArray(templatesQuery.data) && templatesQuery.data.length > 0
-    ? templatesQuery.data
-    : FALLBACK_TEMPLATES;
+  const templates = normalizeTemplates(templatesQuery.data);
   const selectedProject = projects.find((p) => p.id === projectId) ?? null;
 
   useEffect(() => {

@@ -16,6 +16,7 @@ function delay(ms: number) {
 function looksLikeDesktopRuntime() {
   if (typeof window === "undefined") return false;
   if (window.location.protocol === "tauri:") return true;
+  if (window.location.hostname === "tauri.localhost") return true;
   if (/\bTauri\b/i.test(window.navigator.userAgent)) return true;
   return false;
 }

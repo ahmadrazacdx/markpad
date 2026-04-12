@@ -197,6 +197,13 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
         return Err(format!("Bundled backend entry not found: {}", backend_entry.display()));
     }
 
+    let backend_work_dir = backend_entry
+        .parent()
+        .ok_or_else(|| format!("Failed to resolve backend entry parent: {}", backend_entry.display()))?;
+    let backend_entry_file_name = backend_entry
+        .file_name()
+        .ok_or_else(|| format!("Failed to resolve backend entry filename: {}", backend_entry.display()))?;
+
     if !pandoc_bin.exists() {
         return Err(format!("Bundled pandoc binary not found: {}", pandoc_bin.display()));
     }
@@ -215,6 +222,19 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
     let backend_log_err_file = backend_log_file
         .try_clone()
         .map_err(|e| format!("Failed to clone backend log handle {}: {e}", backend_log_path.display()))?;
+    let mut backend_log_meta_file = backend_log_file
+        .try_clone()
+        .map_err(|e| format!("Failed to clone backend metadata log handle {}: {e}", backend_log_path.display()))?;
+
+    writeln!(
+        backend_log_meta_file,
+        "Launching backend node='{}' cwd='{}' entry='{}' port={}",
+        node_bin.display(),
+        backend_work_dir.display(),
+        backend_entry_file_name.to_string_lossy(),
+        port
+    )
+    .map_err(|e| format!("Failed to write backend launch metadata {}: {e}", backend_log_path.display()))?;
 
     let current_path = env::var_os("PATH").unwrap_or_else(OsString::new);
     let mut merged_path = OsString::new();
@@ -229,7 +249,8 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
     command.creation_flags(CREATE_NO_WINDOW);
 
     command
-        .arg(backend_entry)
+        .current_dir(backend_work_dir)
+        .arg(backend_entry_file_name)
         .env("PORT", port.to_string())
         .env("NODE_ENV", "production")
         .env("MARKPAD_DATA_DIR", &app_data_dir)
