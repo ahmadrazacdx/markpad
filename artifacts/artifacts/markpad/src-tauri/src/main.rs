@@ -3,13 +3,9 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
-use std::thread;
-use std::time::{Duration, Instant};
-
 use tauri::Manager;
 
 #[derive(Default)]
@@ -107,7 +103,7 @@ fn spawn_backend(app: &tauri::AppHandle) -> Result<Child, String> {
     let mut command = Command::new(node_bin);
     command
         .arg(backend_entry)
-        .env("PORT", "8080")
+        .env("PORT", "18080")
         .env("NODE_ENV", "production")
         .env("MARKPAD_DATA_DIR", &app_data_dir)
         .env("PATH", merged_path)
@@ -117,20 +113,6 @@ fn spawn_backend(app: &tauri::AppHandle) -> Result<Child, String> {
     command
         .spawn()
         .map_err(|e| format!("Failed to spawn backend: {e}"))
-}
-
-fn wait_for_backend_ready(port: u16, timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
-    let target = SocketAddr::from(([127, 0, 0, 1], port));
-
-    while Instant::now() < deadline {
-        if TcpStream::connect_timeout(&target, Duration::from_millis(300)).is_ok() {
-            return true;
-        }
-        thread::sleep(Duration::from_millis(120));
-    }
-
-    false
 }
 
 fn stop_backend(app: &tauri::AppHandle) {
@@ -150,17 +132,8 @@ fn main() {
         .manage(BackendState::default())
         .setup(|app| {
             if !cfg!(debug_assertions) {
-                let mut child = spawn_backend(&app.handle())
+                let child = spawn_backend(&app.handle())
                     .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
-
-                if !wait_for_backend_ready(8080, Duration::from_secs(12)) {
-                    let _ = child.kill();
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "Backend failed to start within timeout",
-                    )
-                    .into());
-                }
 
                 let state = app.state::<BackendState>();
                 let mut guard = state
