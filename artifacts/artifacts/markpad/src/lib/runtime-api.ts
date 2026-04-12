@@ -1,4 +1,5 @@
 import { setBaseUrl } from "@workspace/api-client-react";
+import { writeFrontendDiagnostic } from "@/lib/diagnostics";
 
 const DEFAULT_DEV_API_PORT = 8080;
 const DEFAULT_DESKTOP_API_PORT = 18080;
@@ -20,18 +21,16 @@ function looksLikeDesktopRuntime() {
 }
 
 async function readBackendPortFromTauri() {
-  const { invoke, isTauri } = await import("@tauri-apps/api/core");
+  const { invoke } = await import("@tauri-apps/api/core");
 
   for (let attempt = 0; attempt < BACKEND_PORT_DISCOVERY_ATTEMPTS; attempt += 1) {
-    if (isTauri()) {
-      try {
-        const port = await invoke<number>("get_backend_port");
-        if (Number.isInteger(port) && port > 0) {
-          return port;
-        }
-      } catch {
-        // Keep trying briefly while desktop runtime initializes.
+    try {
+      const port = await invoke<number>("get_backend_port");
+      if (Number.isInteger(port) && port > 0) {
+        return port;
       }
+    } catch {
+      // Keep trying briefly while desktop runtime initializes.
     }
 
     if (attempt < BACKEND_PORT_DISCOVERY_ATTEMPTS - 1) {
@@ -84,6 +83,7 @@ export async function initializeApiBaseUrl() {
   if (explicitApiBase) {
     resolvedApiBaseUrl = explicitApiBase;
     setBaseUrl(explicitApiBase);
+    void writeFrontendDiagnostic("info", `Using explicit API base URL: ${explicitApiBase}`);
     initialized = true;
     return resolvedApiBaseUrl;
   }
@@ -92,6 +92,13 @@ export async function initializeApiBaseUrl() {
   if (!resolvedApiBaseUrl && import.meta.env.DEV) {
     resolvedApiBaseUrl = `http://127.0.0.1:${DEFAULT_DEV_API_PORT}`;
   }
+
+  if (resolvedApiBaseUrl) {
+    void writeFrontendDiagnostic("info", `Resolved API base URL: ${resolvedApiBaseUrl}`);
+  } else {
+    void writeFrontendDiagnostic("warn", "API base URL could not be resolved; using relative requests.");
+  }
+
   setBaseUrl(resolvedApiBaseUrl);
   initialized = true;
   return resolvedApiBaseUrl;

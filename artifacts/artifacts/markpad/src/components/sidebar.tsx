@@ -50,6 +50,13 @@ type FileEntry = {
   size?: number;
 };
 
+const FALLBACK_TEMPLATES: Array<{ id: string; name: string }> = [
+  { id: "plain", name: "Plain" },
+  { id: "academic", name: "Academic Paper" },
+  { id: "report", name: "Report" },
+  { id: "letter", name: "Letter" },
+];
+
 function normalizeAssetPath(path: string) {
   const trimmed = path.trim().replace(/^\/+/, "");
   return trimmed.startsWith("assets/") ? trimmed : `assets/${trimmed}`;
@@ -135,7 +142,9 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
 
   const projects = Array.isArray(projectsQuery.data) ? projectsQuery.data : [];
   const files = (Array.isArray(filesQuery.data) ? filesQuery.data : []) as FileEntry[];
-  const templates = Array.isArray(templatesQuery.data) ? templatesQuery.data : [];
+  const templates = Array.isArray(templatesQuery.data) && templatesQuery.data.length > 0
+    ? templatesQuery.data
+    : FALLBACK_TEMPLATES;
   const selectedProject = projects.find((p) => p.id === projectId) ?? null;
 
   useEffect(() => {
@@ -147,6 +156,15 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
     if (!filesQuery.error) return;
     toast({ title: "Failed to load files", variant: "destructive" });
   }, [filesQuery.error, toast]);
+
+  useEffect(() => {
+    if (!templatesQuery.error) return;
+    toast({
+      title: "Failed to load templates",
+      description: getErrorMessage(templatesQuery.error, "Backend may be unavailable. Check desktop logs."),
+      variant: "destructive",
+    });
+  }, [templatesQuery.error, toast]);
 
   const createProject = useCreateProject();
   const deleteProject = useDeleteProject();
@@ -873,7 +891,17 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
               <DialogContent>
                 <DialogHeader><DialogTitle>New Project</DialogTitle></DialogHeader>
                 <div className="grid gap-4 py-4">
-                  <Input placeholder="Project Name" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} />
+                  <Input
+                    placeholder="Project Name"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleCreateProject();
+                      }
+                    }}
+                  />
                   <Select value={newProjectTemplate} onValueChange={setNewProjectTemplate}>
                     <SelectTrigger><SelectValue placeholder="Select Template" /></SelectTrigger>
                     <SelectContent>

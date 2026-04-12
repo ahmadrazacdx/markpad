@@ -4,10 +4,12 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -100,6 +102,53 @@ fn resolve_resource_path(app: &tauri::AppHandle, relative: &str) -> Result<PathB
     Ok(resource_dir.join(relative))
 }
 
+fn resolve_app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+
+    fs::create_dir_all(&app_data_dir)
+        .map_err(|e| format!("Failed to create app data dir {}: {e}", app_data_dir.display()))?;
+
+    Ok(app_data_dir)
+}
+
+fn resolve_log_file_path(app: &tauri::AppHandle, file_name: &str) -> Result<PathBuf, String> {
+    let app_data_dir = resolve_app_data_dir(app)?;
+    Ok(app_data_dir.join(file_name))
+}
+
+#[tauri::command]
+fn get_log_paths(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let backend_log = resolve_log_file_path(&app, "backend.log")?;
+    let frontend_log = resolve_log_file_path(&app, "frontend.log")?;
+    Ok(vec![
+        backend_log.display().to_string(),
+        frontend_log.display().to_string(),
+    ])
+}
+
+#[tauri::command]
+fn write_frontend_log(app: tauri::AppHandle, level: String, message: String) -> Result<(), String> {
+    let frontend_log = resolve_log_file_path(&app, "frontend.log")?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&frontend_log)
+        .map_err(|e| format!("Failed to open frontend log {}: {e}", frontend_log.display()))?;
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+
+    writeln!(file, "{} [{}] {}", timestamp, level.to_uppercase(), message)
+        .map_err(|e| format!("Failed to write frontend log {}: {e}", frontend_log.display()))?;
+
+    Ok(())
+}
+
 fn resolve_existing_resource_path(
     app: &tauri::AppHandle,
     candidates: &[&str],
@@ -146,15 +195,8 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
         return Err(format!("Bundled backend entry not found: {}", backend_entry.display()));
     }
 
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
-
-    fs::create_dir_all(&app_data_dir)
-        .map_err(|e| format!("Failed to create app data dir {}: {e}", app_data_dir.display()))?;
-
-    let backend_log_path = app_data_dir.join("backend.log");
+    let app_data_dir = resolve_app_data_dir(app)?;
+    let backend_log_path = resolve_log_file_path(app, "backend.log")?;
     let backend_log_file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -214,7 +256,7 @@ fn stop_backend(app: &tauri::AppHandle) {
 fn main() {
     tauri::Builder::default()
         .manage(BackendState::default())
-        .invoke_handler(tauri::generate_handler![get_backend_port])
+        .invoke_handler(tauri::generate_handler![get_backend_port, get_log_paths, write_frontend_log])
         .setup(|app| {
             if !cfg!(debug_assertions) {
                 let backend_port = select_backend_port()

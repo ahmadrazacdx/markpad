@@ -188,7 +188,7 @@ async function runPandocToPdf(markdown: string, pdfFile: string, engine: "typst"
       execFile(
         "pandoc",
         ["-", ...fromArgs, ...engineArgs, ...pageSizeArg, ...typstLayoutArgs, ...templateArgs, "-o", pdfFile, "--standalone"],
-        { timeout: 15000, maxBuffer: 16 * 1024 * 1024 },
+        { timeout: 15000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
         (error, _stdout, stderr) => {
           if (error) {
             reject(new Error(`${engine.toUpperCase()} render failed: ${stderr || error.message}`));
@@ -288,7 +288,7 @@ export async function renderMarkdownToLatex(markdown: string, rawOptions?: Rende
       execFile(
         "pandoc",
         [mdFile, "--from=markdown+raw_tex", "--to=latex", "--wrap=none", "--template", templateFile, "-o", texFile],
-        { timeout: 15000 },
+        { timeout: 15000, windowsHide: true },
         (error, _stdout, stderr) => {
           if (error) {
             reject(new Error(`Pandoc failed: ${stderr || error.message}`));
