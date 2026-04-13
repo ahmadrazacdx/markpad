@@ -251,8 +251,10 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
     command
         .current_dir(backend_work_dir)
         .arg(backend_entry_file_name)
+        .env_remove("DATABASE_URL")
         .env("PORT", port.to_string())
         .env("NODE_ENV", "production")
+        .env("MARKPAD_DISABLE_RENDERER_WARMUP", "1")
         .env("MARKPAD_DATA_DIR", &app_data_dir)
         .env("MARKPAD_PANDOC_BIN", &pandoc_bin)
         .env("MARKPAD_TYPST_BIN", &typst_bin)

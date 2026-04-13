@@ -27,4 +27,11 @@ const server = app.listen(port, (err) => {
 });
 
 setupWebSocket(server);
-void prewarmPdfRenderer();
+
+const disableRendererWarmup = process.env.MARKPAD_DISABLE_RENDERER_WARMUP === "1";
+
+if (!disableRendererWarmup) {
+  void prewarmPdfRenderer();
+} else {
+  logger.info("PDF renderer warmup disabled by MARKPAD_DISABLE_RENDERER_WARMUP");
+}

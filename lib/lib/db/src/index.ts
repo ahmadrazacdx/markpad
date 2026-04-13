@@ -6,7 +6,26 @@ import * as schema from "./schema";
 
 const dataDir = path.resolve(process.env.MARKPAD_DATA_DIR ?? ".markpad");
 const dbPath = path.resolve(process.env.MARKPAD_DB_PATH ?? path.join(dataDir, "markpad.db"));
-const databaseUrl = process.env.DATABASE_URL ?? `file:${dbPath}`;
+const supportedDatabaseSchemes = new Set(["libsql", "wss", "ws", "https", "http", "file"]);
+
+function getScheme(url: string): string | null {
+  const match = url.match(/^([a-zA-Z][a-zA-Z\d+.-]*):/);
+  return match ? match[1].toLowerCase() : null;
+}
+
+const envDatabaseUrl = process.env.DATABASE_URL?.trim();
+const envDatabaseScheme = envDatabaseUrl ? getScheme(envDatabaseUrl) : null;
+
+const databaseUrl =
+  envDatabaseUrl && envDatabaseScheme && supportedDatabaseSchemes.has(envDatabaseScheme)
+    ? envDatabaseUrl
+    : `file:${dbPath}`;
+
+if (envDatabaseUrl && (!envDatabaseScheme || !supportedDatabaseSchemes.has(envDatabaseScheme))) {
+  console.warn(
+    `[markpad-db] Ignoring unsupported DATABASE_URL scheme (${envDatabaseScheme ?? "unknown"}) and falling back to local file database.`,
+  );
+}
 
 if (databaseUrl.startsWith("file:")) {
   await mkdir(path.dirname(dbPath), { recursive: true });
