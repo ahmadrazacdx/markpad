@@ -140,7 +140,7 @@ fn sanitize_export_name(input: &str) -> String {
     let mut sanitized = input
         .chars()
         .map(|ch| match ch {
-            '/' | '\\\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
             _ => ch,
         })
         .collect::<String>()
