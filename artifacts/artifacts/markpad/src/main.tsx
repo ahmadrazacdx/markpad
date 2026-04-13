@@ -14,6 +14,7 @@ async function bootstrap() {
   }
 
   createRoot(document.getElementById("root")!).render(<App />);
+  void writeFrontendDiagnostic("info", "Frontend bootstrap completed");
 }
 
 void bootstrap();

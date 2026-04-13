@@ -34,6 +34,11 @@ let warmupPromise: Promise<void> | null = null;
 let latexEngineUnavailable = false;
 let typstLinkStyleIncludeFilePath: string | null = null;
 
+function isLatexEngineDisabledByConfig(): boolean {
+  const value = process.env.MARKPAD_PDF_DISABLE_LATEX?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
 function createAbortError(message: string): Error {
   const err = new Error(message) as Error & { name: string; code?: string };
   err.name = "AbortError";
@@ -247,7 +252,7 @@ ${latexFontBlock(options.documentFont)}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs,longtable,array}
 \usepackage{graphicx}
-\usepackage{float}
+\IfFileExists{float.sty}{\usepackage{float}}{}
 \usepackage[table]{xcolor}
 \usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue]{hyperref}
 \setlength{\emergencystretch}{3em}
@@ -314,6 +319,10 @@ export function getRenderEngineOrder(
   options: Required<RenderOptions>,
   isLatexUnavailable: boolean,
 ): Array<"typst" | "latex"> {
+  if (isLatexEngineDisabledByConfig()) {
+    return ["typst"];
+  }
+
   const requiresLatex = needsLatexEngine(markdown);
   const prefersLatexByOptions = options.documentFont !== "latin-modern";
 

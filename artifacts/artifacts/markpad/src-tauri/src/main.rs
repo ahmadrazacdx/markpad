@@ -322,6 +322,7 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
         .env("MARKPAD_DATA_DIR", &app_storage_dir)
         .env("MARKPAD_PANDOC_BIN", &pandoc_bin)
         .env("MARKPAD_TYPST_BIN", &typst_bin)
+        .env("MARKPAD_PDF_DISABLE_LATEX", "1")
         .env("PATH", merged_path)
         .stdout(Stdio::from(backend_log_file))
         .stderr(Stdio::from(backend_log_err_file));
