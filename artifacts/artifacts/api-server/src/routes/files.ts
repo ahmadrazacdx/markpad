@@ -34,6 +34,18 @@ function toFileName(path: string) {
   return cleaned.split("/").pop() || cleaned;
 }
 
+function splitBaseAndExtension(fileName: string) {
+  const lastDot = fileName.lastIndexOf(".");
+  if (lastDot <= 0 || lastDot === fileName.length - 1) {
+    return { base: fileName, extension: "" };
+  }
+
+  return {
+    base: fileName.slice(0, lastDot),
+    extension: fileName.slice(lastDot),
+  };
+}
+
 router.get("/projects/:projectId/files", async (req, res) => {
   try {
     const { projectId } = ListFilesParams.parse(req.params);
@@ -212,7 +224,7 @@ router.patch("/projects/:projectId/files/rename", async (req, res) => {
     }
 
     const fromPathInput = fromPathRaw.trim().replace(/^\/+/, "");
-    const toPathInput = toPathRaw.trim().replace(/^\/+/, "");
+    const toPathInput = toPathRaw.trim();
 
     if (fromPathInput.endsWith("/") || toPathInput.endsWith("/")) {
       res.status(400).json({ error: "Only file paths can be renamed" });
@@ -227,15 +239,31 @@ router.patch("/projects/:projectId/files/rename", async (req, res) => {
       return;
     }
 
+    // Only allow renaming the filename, not moving to a different directory.
+    if (toPath.includes("/")) {
+      res.status(400).json({ error: "Only file name can be changed" });
+      return;
+    }
+
     if (fromPath.startsWith("assets/") || toPath.startsWith("assets/")) {
       res.status(400).json({ error: "Use assets rename endpoint for assets paths" });
       return;
     }
 
-    // Markdown files must remain markdown even if client drops the extension.
-    if (fromPath.toLowerCase().endsWith(".md") && !toPath.toLowerCase().endsWith(".md")) {
-      toPath = `${toPath}.md`;
+    const fromName = toFileName(fromPath);
+    const parentPath = fromPath.includes("/")
+      ? fromPath.slice(0, fromPath.lastIndexOf("/") + 1)
+      : "";
+    const { extension: originalExtension } = splitBaseAndExtension(fromName);
+    const { base: requestedBaseName } = splitBaseAndExtension(toPath);
+    const normalizedBaseName = requestedBaseName.trim();
+
+    if (!normalizedBaseName) {
+      res.status(400).json({ error: "Invalid file name" });
+      return;
     }
+
+    toPath = `${parentPath}${normalizedBaseName}${originalExtension}`;
 
     if (fromPath === toPath) {
       res.json({ path: toPath, name: toFileName(toPath), success: true });
@@ -336,8 +364,21 @@ router.patch("/projects/:projectId/assets/rename", async (req, res) => {
     const toPath = normalizeAssetPath(toPathRaw);
 
     if (fromPath.endsWith("/")) {
+      if (toPathRaw.includes("/")) {
+        res.status(400).json({ error: "Only folder name can be changed" });
+        return;
+      }
+
       const fromPrefix = fromPath;
-      const toPrefix = toPath.endsWith("/") ? toPath : `${toPath}/`;
+      const parentPath = fromPrefix.slice(0, fromPrefix.slice(0, -1).lastIndexOf("/") + 1);
+      const nextFolderName = toFileName(toPath).trim();
+
+      if (!nextFolderName) {
+        res.status(400).json({ error: "Invalid folder name" });
+        return;
+      }
+
+      const toPrefix = `${parentPath}${nextFolderName}/`;
 
       const rows = await db
         .select({ id: filesTable.id, path: filesTable.path })
@@ -357,7 +398,25 @@ router.patch("/projects/:projectId/assets/rename", async (req, res) => {
           .where(eq(filesTable.id, row.id));
       }
     } else {
-      const nextPath = toPath.endsWith("/") ? toPath.slice(0, -1) : toPath;
+      if (toPathRaw.includes("/")) {
+        res.status(400).json({ error: "Only file name can be changed" });
+        return;
+      }
+
+      const fromName = toFileName(fromPath);
+      const parentPath = fromPath.includes("/")
+        ? fromPath.slice(0, fromPath.lastIndexOf("/") + 1)
+        : "";
+      const { extension: originalExtension } = splitBaseAndExtension(fromName);
+      const { base: requestedBaseName } = splitBaseAndExtension(toFileName(toPath));
+      const normalizedBaseName = requestedBaseName.trim();
+
+      if (!normalizedBaseName) {
+        res.status(400).json({ error: "Invalid file name" });
+        return;
+      }
+
+      const nextPath = `${parentPath}${normalizedBaseName}${originalExtension}`;
       const [updated] = await db
         .update(filesTable)
         .set({ path: nextPath, name: toFileName(nextPath) })

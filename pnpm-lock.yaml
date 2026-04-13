@@ -211,6 +211,10 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@25.6.0)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.8.3)
+    optionalDependencies:
+      '@libsql/linux-x64-gnu':
+        specifier: 0.5.29
+        version: 0.5.29
 
   artifacts/artifacts/markpad:
     devDependencies:

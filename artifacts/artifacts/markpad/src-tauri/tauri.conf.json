@@ -4,7 +4,7 @@
   "version": "0.1.1",
   "identifier": "com.markpad.desktop",
   "build": {
-    "beforeBuildCommand": "pnpm run build:desktop:web",
+    "beforeBuildCommand": "pnpm --filter @workspace/api-server build && pnpm run prepare:desktop:resources && pnpm run build:desktop:web",
     "beforeDevCommand": "pnpm run dev",
     "devUrl": "http://localhost:19551",
     "frontendDist": "../dist/public"
@@ -46,6 +46,7 @@
     "resources": ["resources/backend", "resources/runtime", "resources/bin"],
     "windows": {
       "nsis": {
+        "template": "nsis/installer.nsi",
         "installerIcon": "icons/icon.ico",
         "headerImage": "icons/nsis-header.bmp",
         "sidebarImage": "icons/nsis-sidebar.bmp",

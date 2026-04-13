@@ -8,6 +8,15 @@ import { useToast } from "@/hooks/use-toast";
 import { AppPreferences } from "@/lib/preferences";
 import { apiUrl } from "@/lib/runtime-api";
 
+async function isDesktopRuntime() {
+  try {
+    const { isTauri } = await import("@tauri-apps/api/core");
+    return isTauri();
+  } catch {
+    return false;
+  }
+}
+
 interface TopBarProps {
   projectId: number | null;
   selectedFile: string | null;
@@ -43,6 +52,19 @@ export function TopBar({ projectId, selectedFile, content, preferences, onSave, 
       const baseName = selectedFile?.replace(/\.md$/, "") || "markpad";
 
       if (format === "md") {
+        const desktop = await isDesktopRuntime();
+        if (desktop) {
+          const { invoke } = await import("@tauri-apps/api/core");
+          const bytes = Array.from(new TextEncoder().encode(content));
+          await invoke<string>("save_export_to_downloads", {
+            baseName,
+            extension: "md",
+            bytes,
+          });
+          toast({ title: "Saved to Downloads" });
+          return;
+        }
+
         const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
         const objectUrl = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
@@ -77,10 +99,25 @@ export function TopBar({ projectId, selectedFile, content, preferences, onSave, 
       }
 
       const blob = await response.blob();
+      const extension = format === "latex" ? "tex" : "pdf";
+      const desktop = await isDesktopRuntime();
+
+      if (desktop) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+        await invoke<string>("save_export_to_downloads", {
+          baseName,
+          extension,
+          bytes,
+        });
+        toast({ title: "Saved to Downloads" });
+        return;
+      }
+
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
-      anchor.download = `${baseName}.${format === "latex" ? "tex" : "pdf"}`;
+      anchor.download = `${baseName}.${extension}`;
       anchor.click();
       URL.revokeObjectURL(objectUrl);
       toast({ title: `Exported as ${format.toUpperCase()}` });
@@ -121,7 +158,7 @@ export function TopBar({ projectId, selectedFile, content, preferences, onSave, 
           <Button 
             variant="outline" 
             size="sm" 
-            className="gap-2 border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200 transition-all duration-200 shadow-sm hover:shadow-md" 
+            className="gap-2 border-primary bg-primary text-primary-foreground hover:opacity-90 transition-all duration-150 hover:scale-[1.02] active:scale-[0.99] shadow-sm text-[13.5px] font-semibold" 
             disabled={!projectId || !selectedFile || isSaving || isExporting}
             onClick={onSave}
           >
@@ -143,7 +180,7 @@ export function TopBar({ projectId, selectedFile, content, preferences, onSave, 
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 border-sky-500/40 bg-sky-500/10 text-sky-700 hover:bg-sky-500/20 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200 transition-all duration-200 shadow-sm hover:shadow-md"
+              className="gap-2 border-primary bg-primary text-primary-foreground hover:opacity-90 transition-all duration-150 hover:scale-[1.02] active:scale-[0.99] shadow-sm text-[13.5px] font-semibold"
               disabled={!projectId || !selectedFile || isExporting}
             >
               {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
@@ -160,7 +197,7 @@ export function TopBar({ projectId, selectedFile, content, preferences, onSave, 
         <Button 
           variant="outline" 
           size="sm" 
-          className="gap-2 border-violet-500/40 bg-violet-500/10 text-violet-700 hover:bg-violet-500/20 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-200 transition-all duration-200 shadow-sm hover:shadow-md" 
+          className="gap-2 border-primary bg-primary text-primary-foreground hover:opacity-90 transition-all duration-150 hover:scale-[1.02] active:scale-[0.99] shadow-sm text-[13.5px] font-semibold" 
           disabled={!projectId || !selectedFile}
           onClick={onOpenHistory}
         >
@@ -171,7 +208,7 @@ export function TopBar({ projectId, selectedFile, content, preferences, onSave, 
         <Button
           variant="ghost"
           size="icon"
-          className="relative transition-all duration-150 hover:scale-105 hover:bg-accent/50"
+          className="relative transition-all duration-150 hover:scale-110 active:scale-95 hover:bg-accent/50"
           onClick={handleToggleTheme}
         >
           <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all duration-200 dark:-rotate-90 dark:scale-0" />

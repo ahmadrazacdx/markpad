@@ -1,7 +1,6 @@
 import { setBaseUrl } from "@workspace/api-client-react";
 import { writeFrontendDiagnostic } from "@/lib/diagnostics";
 
-const DEFAULT_DEV_API_PORT = 8080;
 const DEFAULT_DESKTOP_API_PORT = 18080;
 const BACKEND_PORT_DISCOVERY_ATTEMPTS = 8;
 const BACKEND_PORT_DISCOVERY_DELAY_MS = 80;
@@ -90,12 +89,11 @@ export async function initializeApiBaseUrl() {
   }
 
   resolvedApiBaseUrl = await resolveDesktopApiBaseUrl();
-  if (!resolvedApiBaseUrl && import.meta.env.DEV) {
-    resolvedApiBaseUrl = `http://127.0.0.1:${DEFAULT_DEV_API_PORT}`;
-  }
 
   if (resolvedApiBaseUrl) {
     void writeFrontendDiagnostic("info", `Resolved API base URL: ${resolvedApiBaseUrl}`);
+  } else if (import.meta.env.DEV) {
+    void writeFrontendDiagnostic("info", "Using relative API requests via Vite /api proxy in dev mode.");
   } else {
     void writeFrontendDiagnostic("warn", "API base URL could not be resolved; using relative requests.");
   }

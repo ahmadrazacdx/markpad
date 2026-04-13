@@ -114,9 +114,44 @@ fn resolve_app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir)
 }
 
+fn resolve_app_storage_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let app_local_data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("Failed to resolve app local data dir: {e}"))?;
+
+    let storage_dir = app_local_data_dir.join("data");
+    fs::create_dir_all(&storage_dir).map_err(|e| {
+        format!(
+            "Failed to create app storage dir {}: {e}",
+            storage_dir.display()
+        )
+    })?;
+
+    Ok(storage_dir)
+}
+
 fn resolve_log_file_path(app: &tauri::AppHandle, file_name: &str) -> Result<PathBuf, String> {
     let app_data_dir = resolve_app_data_dir(app)?;
     Ok(app_data_dir.join(file_name))
+}
+
+fn sanitize_export_name(input: &str) -> String {
+    let mut sanitized = input
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            _ => ch,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string();
+
+    if sanitized.is_empty() {
+        sanitized = "markpad".to_string();
+    }
+
+    sanitized
 }
 
 #[tauri::command]
@@ -147,6 +182,32 @@ fn write_frontend_log(app: tauri::AppHandle, level: String, message: String) -> 
         .map_err(|e| format!("Failed to write frontend log {}: {e}", frontend_log.display()))?;
 
     Ok(())
+}
+
+#[tauri::command]
+fn save_export_to_downloads(
+    app: tauri::AppHandle,
+    base_name: String,
+    extension: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    let downloads_dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("Failed to resolve downloads dir: {e}"))?;
+
+    fs::create_dir_all(&downloads_dir)
+        .map_err(|e| format!("Failed to create downloads dir {}: {e}", downloads_dir.display()))?;
+
+    let safe_base = sanitize_export_name(&base_name);
+    let safe_ext = sanitize_export_name(&extension).to_lowercase();
+    let file_name = format!("{}.{}", safe_base, safe_ext);
+    let file_path = downloads_dir.join(file_name);
+
+    fs::write(&file_path, bytes)
+        .map_err(|e| format!("Failed to write export file {}: {e}", file_path.display()))?;
+
+    Ok(file_path.display().to_string())
 }
 
 fn resolve_existing_resource_path(
@@ -212,7 +273,7 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
         return Err(format!("Bundled typst binary not found: {}", typst_bin.display()));
     }
 
-    let app_data_dir = resolve_app_data_dir(app)?;
+    let app_storage_dir = resolve_app_storage_dir(app)?;
     let backend_log_path = resolve_log_file_path(app, "backend.log")?;
     let backend_log_file = OpenOptions::new()
         .create(true)
@@ -244,6 +305,9 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
     merged_path.push(path_delimiter());
     merged_path.push(current_path);
 
+    let renderer_warmup_delay_ms =
+        env::var("MARKPAD_RENDERER_WARMUP_DELAY_MS").unwrap_or_else(|_| "0".to_string());
+
     let mut command = Command::new(node_bin);
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
@@ -254,8 +318,8 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> Result<Child, String> {
         .env_remove("DATABASE_URL")
         .env("PORT", port.to_string())
         .env("NODE_ENV", "production")
-        .env("MARKPAD_DISABLE_RENDERER_WARMUP", "1")
-        .env("MARKPAD_DATA_DIR", &app_data_dir)
+        .env("MARKPAD_RENDERER_WARMUP_DELAY_MS", renderer_warmup_delay_ms)
+        .env("MARKPAD_DATA_DIR", &app_storage_dir)
         .env("MARKPAD_PANDOC_BIN", &pandoc_bin)
         .env("MARKPAD_TYPST_BIN", &typst_bin)
         .env("PATH", merged_path)
@@ -291,7 +355,12 @@ fn stop_backend(app: &tauri::AppHandle) {
 fn main() {
     tauri::Builder::default()
         .manage(BackendState::default())
-        .invoke_handler(tauri::generate_handler![get_backend_port, get_log_paths, write_frontend_log])
+        .invoke_handler(tauri::generate_handler![
+            get_backend_port,
+            get_log_paths,
+            write_frontend_log,
+            save_export_to_downloads
+        ])
         .setup(|app| {
             if !cfg!(debug_assertions) {
                 let backend_port = select_backend_port()

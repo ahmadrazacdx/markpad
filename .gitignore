@@ -51,3 +51,5 @@ Thumbs.db
 artifacts/artifacts/markpad/src-tauri/resources/backend/
 artifacts/artifacts/markpad/src-tauri/resources/runtime/
 artifacts/artifacts/markpad/src-tauri/resources/bin/
+artifacts/artifacts/api-server/.markpad/
+artifacts/artifacts/markpad/src-tauri/nsis/installer.nsi

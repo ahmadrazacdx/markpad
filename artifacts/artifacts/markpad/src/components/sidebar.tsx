@@ -86,6 +86,35 @@ function normalizeAssetPath(path: string) {
   return trimmed.startsWith("assets/") ? trimmed : `assets/${trimmed}`;
 }
 
+function nextUntitledFileName(entries: FileEntry[]) {
+  const existing = new Set(
+    entries
+      .filter((entry) => !entry.path.startsWith("assets/") && entry.type === "file")
+      .map((entry) => entry.path.toLowerCase()),
+  );
+
+  if (!existing.has("untitled.md")) return "untitled.md";
+
+  let index = 2;
+  while (existing.has(`untitled${index}.md`)) {
+    index += 1;
+  }
+
+  return `untitled${index}.md`;
+}
+
+function splitBaseAndExtension(fileName: string) {
+  const lastDot = fileName.lastIndexOf(".");
+  if (lastDot <= 0 || lastDot === fileName.length - 1) {
+    return { base: fileName, extension: "" };
+  }
+
+  return {
+    base: fileName.slice(0, lastDot),
+    extension: fileName.slice(lastDot),
+  };
+}
+
 function colorFromName(name: string) {
   const palette = ["#f59e0b", "#f97316", "#60a5fa", "#22c55e", "#a78bfa", "#fb7185"];
   let hash = 0;
@@ -128,7 +157,20 @@ function ProjectsIcon() {
 }
 
 function FolderIcon({ color = "#f59e0b", size = 16, className = "" }: { color?: string; size?: number; className?: string }) {
-  return <FolderGlyph className={`leading-none ${className}`} style={{ color, width: size, height: size }} aria-hidden />;
+  return (
+    <FolderGlyph
+      className={`leading-none ${className}`}
+      style={{
+        color,
+        fill: color,
+        fillOpacity: 0.2,
+        stroke: color,
+        width: size,
+        height: size,
+      }}
+      aria-hidden
+    />
+  );
 }
 
 export function Sidebar({ onToggleCollapse, projectId, preferences, onPreferencesChange, onProjectSelect, selectedFile, onFileSelect }: SidebarProps) {
@@ -235,6 +277,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
     }),
     [files],
   );
+  const suggestedUntitledName = useMemo(() => nextUntitledFileName(files), [files]);
 
   const assetChildren = useMemo(
     () => files
@@ -311,7 +354,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
     const name = raw.endsWith(".md") ? raw : `${raw}.md`;
 
     setIsCreatingFileInline(false);
-    setInlineFileName("untitled.md");
+    setInlineFileName(suggestedUntitledName);
 
     queryClient.setQueryData(filesKey, (old: unknown) => {
       const items = Array.isArray(old) ? old : [];
@@ -491,10 +534,27 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
 
     const isFolder = oldPath.endsWith("/");
     const oldParts = oldPath.split("/").filter(Boolean);
-    const parentParts = isFolder ? oldParts.slice(0, -1) : oldParts.slice(0, -1);
+    const parentParts = oldParts.slice(0, -1);
+    const previousName = oldParts[oldParts.length - 1] ?? "";
+
+    let normalizedName = trimmedName;
+    if (!isFolder) {
+      const { extension: oldExtension } = splitBaseAndExtension(previousName);
+      const { base: requestedBaseName } = splitBaseAndExtension(trimmedName);
+      const baseName = requestedBaseName.trim();
+      if (!baseName) {
+        toast({ title: "Name cannot be empty", variant: "destructive" });
+        return;
+      }
+      normalizedName = `${baseName}${oldExtension}`;
+    } else if (!normalizedName.trim()) {
+      toast({ title: "Name cannot be empty", variant: "destructive" });
+      return;
+    }
+
     const newPath = isFolder
-      ? `${[...parentParts, trimmedName].join("/")}/`
-      : [...parentParts, trimmedName].join("/");
+      ? `${[...parentParts, normalizedName].join("/")}/`
+      : [...parentParts, normalizedName].join("/");
 
     const filesKey = getListFilesQueryKey(projectId);
     const previousFiles = queryClient.getQueryData(filesKey) as FileEntry[] | undefined;
@@ -531,7 +591,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
       const response = await fetch(apiUrl(`/api/projects/${projectId}/assets/rename`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromPath: oldPath, toPath: newPath }),
+        body: JSON.stringify({ fromPath: oldPath, toPath: normalizedName }),
       });
 
       if (!response.ok) {
@@ -597,19 +657,25 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
       return;
     }
 
-    let trimmedName = renameFileName.trim();
+    const trimmedName = renameFileName.trim();
     if (trimmedName.includes("/")) {
       toast({ title: "Name cannot include /", variant: "destructive" });
       return;
     }
 
-    if (oldPath.endsWith(".md") && !trimmedName.toLowerCase().endsWith(".md")) {
-      trimmedName = `${trimmedName}.md`;
-    }
-
     const oldParts = oldPath.split("/").filter(Boolean);
     const parentParts = oldParts.slice(0, -1);
-    const newPath = [...parentParts, trimmedName].join("/");
+    const previousName = oldParts[oldParts.length - 1] ?? "";
+    const { extension: previousExtension } = splitBaseAndExtension(previousName);
+    const { base: requestedBaseName } = splitBaseAndExtension(trimmedName);
+    const baseName = requestedBaseName.trim();
+    if (!baseName) {
+      toast({ title: "Name cannot be empty", variant: "destructive" });
+      return;
+    }
+
+    const normalizedName = `${baseName}${previousExtension}`;
+    const newPath = [...parentParts, normalizedName].join("/");
 
     if (!newPath || newPath === oldPath) {
       setRenamingFilePath(null);
@@ -637,7 +703,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
       const response = await fetch(apiUrl(`/api/projects/${projectId}/files/rename`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromPath: oldPath, toPath: newPath }),
+        body: JSON.stringify({ fromPath: oldPath, toPath: normalizedName }),
       });
 
       if (!response.ok) {
@@ -743,15 +809,16 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
       >
         <DialogTrigger asChild>
           <Button
-            variant="ghost"
-            className="w-full justify-start gap-3 rounded-lg border border-sky-500/25 bg-gradient-to-r from-sky-500/10 via-indigo-500/10 to-violet-500/10 px-3 py-2 text-sm shadow-sm transition-all duration-200 hover:from-sky-500/20 hover:via-indigo-500/20 hover:to-violet-500/20 hover:shadow-md"
+            variant="outline"
+            size="sm"
+            className="w-full justify-start gap-3 border-foreground bg-foreground px-3 py-2 text-[13.5px] font-semibold text-background shadow-sm transition-opacity hover:opacity-90 dark:border-primary dark:bg-primary dark:text-primary-foreground"
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-sky-500/20 text-sky-300">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-background/20 text-background dark:text-primary-foreground">
               <Settings2 className="w-4 h-4" />
             </span>
             <span className="flex flex-col items-start leading-tight">
-              <span className="text-sm font-medium">Settings</span>
-              <span className="text-[11px] text-muted-foreground">Preview, Export, Editor</span>
+              <span className="text-sm font-semibold text-background dark:text-primary-foreground">Settings</span>
+              <span className="text-[11px] text-background/80 dark:text-primary-foreground/80">Preview, Export</span>
             </span>
           </Button>
         </DialogTrigger>
@@ -908,11 +975,11 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
           <div className="flex items-center gap-1">
             <Dialog open={isNewProjectOpen} onOpenChange={setIsNewProjectOpen}>
               <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-6 w-6"><AddActionIcon /></Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6 transition-transform hover:scale-105"><AddActionIcon /></Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="max-w-[360px] p-5">
                 <DialogHeader><DialogTitle>New Project</DialogTitle></DialogHeader>
-                <div className="grid gap-4 py-4">
+                <div className="grid gap-3 py-2">
                   <Input
                     placeholder="Project Name"
                     value={newProjectName}
@@ -936,7 +1003,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
                 </div>
               </DialogContent>
             </Dialog>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onToggleCollapse} aria-label="Collapse sidebar">
+            <Button variant="ghost" size="icon" className="h-6 w-6 transition-transform hover:scale-105" onClick={onToggleCollapse} aria-label="Collapse sidebar">
               <PanelLeftClose className="w-4 h-4" />
             </Button>
           </div>
@@ -998,16 +1065,16 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6"
+            className="h-6 w-6 transition-transform hover:scale-105"
             onClick={() => {
-              setInlineFileName("untitled.md");
+              setInlineFileName(suggestedUntitledName);
               setIsCreatingFileInline(true);
             }}
             aria-label="Create new file"
           >
             <AddActionIcon />
           </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onToggleCollapse} aria-label="Collapse sidebar">
+          <Button variant="ghost" size="icon" className="h-6 w-6 transition-transform hover:scale-105" onClick={onToggleCollapse} aria-label="Collapse sidebar">
             <PanelLeftClose className="w-4 h-4" />
           </Button>
         </div>
@@ -1023,17 +1090,17 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
             </button>
             <Dialog open={isNewAssetFolderOpen} onOpenChange={setIsNewAssetFolderOpen}>
               <DialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => e.stopPropagation()}><AddActionIcon /></Button>
+                <Button variant="ghost" size="icon" className="h-5 w-5 transition-transform hover:scale-105" onClick={(e) => e.stopPropagation()}><AddActionIcon /></Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="max-w-[360px] p-5">
                 <DialogHeader><DialogTitle>New Asset Folder</DialogTitle></DialogHeader>
-                <div className="grid gap-4 py-4">
+                <div className="grid gap-3 py-2">
                   <Input placeholder="Folder path (e.g. images/icons)" value={newAssetFolderName} onChange={(e) => setNewAssetFolderName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleCreateAssetFolder()} />
                   <Button onClick={handleCreateAssetFolder}>Create</Button>
                 </div>
               </DialogContent>
             </Dialog>
-            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => fileInputRef.current?.click()}>
+            <Button variant="ghost" size="icon" className="h-5 w-5 transition-transform hover:scale-105" onClick={() => fileInputRef.current?.click()}>
               <Upload className="w-3 h-3" />
             </Button>
           </div>

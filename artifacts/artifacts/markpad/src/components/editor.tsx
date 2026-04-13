@@ -236,8 +236,48 @@ export function Editor({ value, onChange, onSave, fontFamily = "space-mono", fon
       highlightSelectionMatches(),
       autocompletion({ override: [latexCommandCompletionSource, markdownSnippetCompletionSource], activateOnTyping: true }),
       closeBrackets(),
-      EditorState.languageData.of(() => [{ closeBrackets: { brackets: ["$"] } }]),
+      EditorState.languageData.of(() => [{ closeBrackets: { brackets: ["(", "[", "{", "'", "\""] } }]),
       EditorView.inputHandler.of((view, from, to, text) => {
+        if (text === "$") {
+          const selection = view.state.selection.main;
+          const selectedText = view.state.sliceDoc(selection.from, selection.to);
+
+          if (selection.from !== selection.to) {
+            view.dispatch({
+              changes: {
+                from: selection.from,
+                to: selection.to,
+                insert: `$${selectedText}$`,
+              },
+              selection: { anchor: selection.to + 2 },
+            });
+            return true;
+          }
+
+          const prevChar = selection.from > 0 ? view.state.sliceDoc(selection.from - 1, selection.from) : "";
+          const nextChar = selection.from < view.state.doc.length ? view.state.sliceDoc(selection.from, selection.from + 1) : "";
+
+          // Typing a second $ inside an auto-paired $|$ expands to $$|$$.
+          if (prevChar === "$" && nextChar === "$") {
+            view.dispatch({
+              changes: {
+                from: selection.from - 1,
+                to: selection.from + 1,
+                insert: "$$$$",
+              },
+              selection: { anchor: selection.from + 2 },
+            });
+            return true;
+          }
+
+          // Default $ insertion produces paired delimiters with the cursor inside.
+          view.dispatch({
+            changes: { from, to, insert: "$$" },
+            selection: { anchor: from + 1 },
+          });
+          return true;
+        }
+
         if (text === "\\") {
           view.dispatch({
             changes: { from, to, insert: text },

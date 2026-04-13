@@ -71,7 +71,7 @@ router.get("/projects/:projectId/export", async (req, res) => {
     }
 
     if (format === "pdf") {
-      const pdfBytes = await renderMarkdownToPdf(fileRecord.content);
+      const pdfBytes = await renderMarkdownToPdf(fileRecord.content, undefined, projectId);
       const pdfFilename = filePath.replace(/\.md$/, ".pdf");
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${pdfFilename}"`);
@@ -90,10 +90,10 @@ router.get("/projects/:projectId/export", async (req, res) => {
 
 router.post("/projects/:projectId/render", async (req, res) => {
   try {
-    RenderPreviewParams.parse(req.params);
+    const { projectId } = RenderPreviewParams.parse(req.params);
     const { content } = RenderPreviewBody.parse(req.body);
     const options = parseRenderOptions((req.body as { options?: unknown })?.options);
-    const pdfBytes = await renderMarkdownToPdf(content, options);
+    const pdfBytes = await renderMarkdownToPdf(content, options, projectId);
     res.setHeader("Content-Type", "application/pdf");
     res.send(Buffer.from(pdfBytes));
   } catch (err) {

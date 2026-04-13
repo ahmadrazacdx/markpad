@@ -1,7 +1,51 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
+import { performance } from "node:perf_hooks";
 import { renderMarkdownToPdf, RenderOptions } from "./renderer";
 import { logger } from "./logger";
+
+const DEFAULT_WS_PREVIEW_DEBOUNCE_MS = 70;
+
+type PendingRequest = {
+  projectId: number;
+  content: string;
+  options: RenderOptions;
+  requestedAtMs: number;
+};
+
+export type WebSocketPreviewConfig = {
+  debounceMs: number;
+  cancelInFlight: boolean;
+  metricsEnabled: boolean;
+};
+
+function parseIntegerSetting(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+export function resolveWebSocketPreviewConfig(env: NodeJS.ProcessEnv = process.env): WebSocketPreviewConfig {
+  return {
+    debounceMs: parseIntegerSetting(env.MARKPAD_PREVIEW_WS_DEBOUNCE_MS, DEFAULT_WS_PREVIEW_DEBOUNCE_MS, 0, 500),
+    cancelInFlight: env.MARKPAD_PREVIEW_CANCEL_INFLIGHT !== "0",
+    metricsEnabled: env.MARKPAD_PREVIEW_METRICS === "1",
+  };
+}
+
+export function isAbortLikeError(err: unknown): boolean {
+  const maybeErr = err as { name?: string; code?: string; message?: string };
+  if (maybeErr?.name === "AbortError") return true;
+  if (maybeErr?.code === "ABORT_ERR") return true;
+  if (typeof maybeErr?.message === "string" && /aborted|abort/i.test(maybeErr.message)) return true;
+  return false;
+}
 
 function parseRenderOptions(input: unknown): RenderOptions {
   if (!input || typeof input !== "object") return {};
@@ -33,6 +77,7 @@ function parseRenderOptions(input: unknown): RenderOptions {
 }
 
 export function setupWebSocket(server: Server) {
+  const config = resolveWebSocketPreviewConfig();
   const wss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (request, socket, head) => {
@@ -51,39 +96,76 @@ export function setupWebSocket(server: Server) {
 
     let renderTimer: ReturnType<typeof setTimeout> | null = null;
     let isRendering = false;
-    let pendingRequest: { content: string; options: RenderOptions } | null = null;
+    let pendingRequest: PendingRequest | null = null;
+    let activeRenderAbortController: AbortController | null = null;
     let lastRequestedKey = "";
     let lastRenderedKey = "";
 
-    async function doRender(content: string, options: RenderOptions) {
-      const key = `${content}:${JSON.stringify(options)}`;
+    async function doRender(projectId: number, content: string, options: RenderOptions, requestedAtMs: number) {
+      const key = `${projectId}:${content}:${JSON.stringify(options)}`;
       if (key === lastRenderedKey) {
         return;
       }
 
       if (isRendering) {
-        pendingRequest = { content, options };
+        pendingRequest = { projectId, content, options, requestedAtMs };
+        if (config.cancelInFlight && activeRenderAbortController && !activeRenderAbortController.signal.aborted) {
+          activeRenderAbortController.abort();
+        }
         return;
       }
 
       isRendering = true;
+      const renderAbortController = new AbortController();
+      activeRenderAbortController = renderAbortController;
+      const renderStartedAt = performance.now();
       try {
-        const pdfBytes = await renderMarkdownToPdf(content, options);
+        const pdfBytes = await renderMarkdownToPdf(content, options, projectId, {
+          signal: renderAbortController.signal,
+        });
+
+        if (renderAbortController.signal.aborted) {
+          return;
+        }
+
         lastRenderedKey = key;
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(pdfBytes, { binary: true });
         }
+
+        if (config.metricsEnabled) {
+          const finishedAt = performance.now();
+          logger.info(
+            {
+              queueDelayMs: Number((renderStartedAt - requestedAtMs).toFixed(1)),
+              renderMs: Number((finishedAt - renderStartedAt).toFixed(1)),
+              totalMs: Number((finishedAt - requestedAtMs).toFixed(1)),
+              contentLength: content.length,
+            },
+            "WebSocket preview render completed",
+          );
+        }
       } catch (err) {
+        if (isAbortLikeError(err) || renderAbortController.signal.aborted) {
+          if (config.metricsEnabled) {
+            logger.debug({ contentLength: content.length }, "WebSocket preview render aborted");
+          }
+          return;
+        }
+
         logger.error({ err }, "WebSocket render failed");
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ error: (err as Error).message }));
         }
       } finally {
+        if (activeRenderAbortController === renderAbortController) {
+          activeRenderAbortController = null;
+        }
         isRendering = false;
         if (pendingRequest !== null) {
           const next = pendingRequest;
           pendingRequest = null;
-          doRender(next.content, next.options);
+          void doRender(next.projectId, next.content, next.options, next.requestedAtMs);
         }
       }
     }
@@ -91,15 +173,16 @@ export function setupWebSocket(server: Server) {
     ws.on("message", (data: Buffer) => {
       try {
         const msg = JSON.parse(data.toString());
-        if (msg.content !== undefined) {
+        const projectId = typeof msg.projectId === "number" && Number.isInteger(msg.projectId) ? msg.projectId : null;
+        if (typeof msg.content === "string" && projectId && projectId > 0) {
           const options = parseRenderOptions(msg.options);
-          const requestKey = `${msg.content}:${JSON.stringify(options)}`;
+          const requestKey = `${projectId}:${msg.content}:${JSON.stringify(options)}`;
           if (requestKey === lastRequestedKey) return;
           lastRequestedKey = requestKey;
           if (renderTimer) clearTimeout(renderTimer);
           renderTimer = setTimeout(() => {
-            doRender(msg.content, options);
-          }, 140);
+            void doRender(projectId, msg.content, options, performance.now());
+          }, config.debounceMs);
         }
       } catch {
         logger.warn("Invalid WebSocket message received");
@@ -108,6 +191,9 @@ export function setupWebSocket(server: Server) {
 
     ws.on("close", () => {
       if (renderTimer) clearTimeout(renderTimer);
+      if (activeRenderAbortController && !activeRenderAbortController.signal.aborted) {
+        activeRenderAbortController.abort();
+      }
       logger.info("WebSocket preview client disconnected");
     });
 
