@@ -1,7 +1,7 @@
 import { execFile } from "child_process";
 import { writeFile, readFile, unlink, mkdir, rm } from "fs/promises";
 import { tmpdir } from "os";
-import { dirname, join } from "path";
+import { dirname, isAbsolute, join, resolve } from "path";
 import { randomBytes } from "crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@workspace/db";
@@ -510,7 +510,11 @@ export function normalizeMarkdownForPdf(markdown: string): string {
 
 function resolvePandocBinary(): string {
   const configured = process.env.MARKPAD_PANDOC_BIN?.trim();
-  return configured && configured.length > 0 ? configured : "pandoc";
+  if (configured && configured.length > 0) {
+    return isAbsolute(configured) ? configured : resolve(configured);
+  }
+
+  return "pandoc";
 }
 
 function resolvePdfEngineBinary(engine: "typst" | "latex"): string {
@@ -520,7 +524,7 @@ function resolvePdfEngineBinary(engine: "typst" | "latex"): string {
 
   const configured = process.env.MARKPAD_TYPST_BIN?.trim();
   if (configured && configured.length > 0) {
-    return configured;
+    return isAbsolute(configured) ? configured : resolve(configured);
   }
 
   return process.platform === "win32" ? "typst.exe" : "typst";
