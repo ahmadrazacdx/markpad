@@ -45,7 +45,7 @@ jobs:
         working-directory: artifacts/artifacts/markpdf-cli
         run: |
           $ErrorActionPreference = "Stop"
-          pnpm dlx rcedit out/markpdf.exe --set-icon public/markpdf-installer.ico
+          pnpm dlx resedit-cli --in out/markpdf.exe --out out/markpdf.exe --icon public/markpdf-installer.ico
 
       - name: Download pandoc.exe
         shell: pwsh
