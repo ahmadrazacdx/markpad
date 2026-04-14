@@ -1,0 +1,12 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="markpdfGradient" x1="6" y1="6" x2="58" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1f6feb" />
+      <stop offset="1" stop-color="#11a36c" />
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="52" height="52" rx="14" fill="url(#markpdfGradient)" />
+  <path d="M20 44V20H31.5C36.1944 20 40 23.8056 40 28.5C40 33.1944 36.1944 37 31.5 37H27V44H20Z" fill="white" />
+  <path d="M27 29.5H31.2C32.3046 29.5 33.2 28.6046 33.2 27.5C33.2 26.3954 32.3046 25.5 31.2 25.5H27V29.5Z" fill="#1f6feb" fill-opacity="0.35" />
+  <path d="M42 44V20H47.2C52.0598 20 56 23.9402 56 28.8C56 33.6598 52.0598 37.6 47.2 37.6H46V44H42Z" fill="white" fill-opacity="0.92" />
+</svg>

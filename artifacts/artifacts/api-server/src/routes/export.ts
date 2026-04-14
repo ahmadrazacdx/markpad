@@ -1,12 +1,32 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { filesTable, snapshotsTable } from "@workspace/db";
+import { filesTable, projectsTable, snapshotsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { ExportProjectParams, ExportProjectQueryParams, RenderPreviewParams, RenderPreviewBody } from "@workspace/api-zod";
+import { zipSync } from "fflate";
 import { renderMarkdownToPdf, renderMarkdownToLatex, RenderOptions } from "../lib/renderer";
 import { handleRouteError } from "../lib/http";
 
 const router = Router();
+const FAST_ZIP_LEVEL = 0;
+
+function sanitizeArchiveBaseName(name: string, fallback: string) {
+  const cleaned = name
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
+function decodeStoredAssetContent(content: string): Uint8Array {
+  const dataUriMatch = content.match(/^data:[^;]+;base64,(.+)$/i);
+  if (dataUriMatch) {
+    return Buffer.from(dataUriMatch[1], "base64");
+  }
+
+  return Buffer.from(content, "utf8");
+}
 
 function parseRenderOptions(input: unknown): RenderOptions {
   if (!input || typeof input !== "object") return {};
@@ -84,6 +104,57 @@ router.get("/projects/:projectId/export", async (req, res) => {
     handleRouteError(req, res, err, {
       logMessage: "Failed to export",
       publicMessage: "Failed to export",
+    });
+  }
+});
+
+router.get("/projects/:projectId/export/project-bundle", async (req, res) => {
+  try {
+    const { projectId } = ExportProjectParams.parse(req.params);
+
+    const [project] = await db
+      .select({ name: projectsTable.name })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId));
+
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const rows = await db
+      .select({ path: filesTable.path, content: filesTable.content })
+      .from(filesTable)
+      .where(eq(filesTable.projectId, projectId));
+
+    const zipEntries: Record<string, Uint8Array> = {};
+    for (const row of rows) {
+      if (row.path.endsWith("/")) {
+        continue;
+      }
+
+      zipEntries[row.path] = row.path.startsWith("assets/")
+        ? decodeStoredAssetContent(row.content)
+        : Buffer.from(row.content, "utf8");
+    }
+
+    const entryPaths = Object.keys(zipEntries);
+    if (entryPaths.length === 0) {
+      res.status(404).json({ error: "Project has no files to export" });
+      return;
+    }
+
+    const zipBytes = zipSync(zipEntries, { level: FAST_ZIP_LEVEL });
+    const baseName = sanitizeArchiveBaseName(project.name, `project-${projectId}`);
+    const fileName = `${baseName}.zip`;
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.send(Buffer.from(zipBytes));
+  } catch (err) {
+    handleRouteError(req, res, err, {
+      logMessage: "Failed to export project bundle",
+      publicMessage: "Failed to export project bundle",
     });
   }
 });

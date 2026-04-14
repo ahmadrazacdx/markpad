@@ -8,6 +8,8 @@ import {
   Upload,
   ArrowLeft,
   PanelLeftClose,
+  Archive,
+  Loader2,
   Settings2,
   Folder as FolderGlyph,
   FileText,
@@ -32,6 +34,15 @@ import {
   PAGE_SIZE_OPTIONS,
 } from "@/lib/preferences";
 import { apiUrl } from "@/lib/runtime-api";
+
+async function isDesktopRuntime() {
+  try {
+    const { isTauri } = await import("@tauri-apps/api/core");
+    return isTauri();
+  } catch {
+    return false;
+  }
+}
 
 interface SidebarProps {
   onToggleCollapse: () => void;
@@ -254,6 +265,7 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
   const [renamingAssetPath, setRenamingAssetPath] = useState<string | null>(null);
   const [renameAssetName, setRenameAssetName] = useState("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSavingProject, setIsSavingProject] = useState(false);
   const [draftPreferences, setDraftPreferences] = useState<AppPreferences>(preferences);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inlineFileInputRef = useRef<HTMLInputElement>(null);
@@ -798,8 +810,88 @@ export function Sidebar({ onToggleCollapse, projectId, preferences, onPreference
     }
   };
 
+  const extractFileNameFromDisposition = (headerValue: string | null) => {
+    if (!headerValue) return null;
+    const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match && utf8Match[1]) {
+      return decodeURIComponent(utf8Match[1]);
+    }
+
+    const plainMatch = headerValue.match(/filename="?([^";]+)"?/i);
+    return plainMatch?.[1] ?? null;
+  };
+
+  const handleSaveProject = async () => {
+    if (!projectId) return;
+    const startedAt = Date.now();
+    setIsSavingProject(true);
+
+    try {
+      const response = await fetch(apiUrl(`/api/projects/${projectId}/export/project-bundle`), {
+        method: "GET",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Save project failed: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      const downloadName = extractFileNameFromDisposition(response.headers.get("content-disposition")) ?? `project-${projectId}.zip`;
+      const desktop = await isDesktopRuntime();
+
+      if (desktop) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+        const lastDot = downloadName.lastIndexOf(".");
+        const baseName = lastDot > 0 ? downloadName.slice(0, lastDot) : downloadName;
+        const extension = lastDot > 0 ? downloadName.slice(lastDot + 1) : "zip";
+
+        await invoke<string>("save_export_to_downloads", {
+          baseName,
+          extension,
+          bytes,
+        });
+        toast({ title: "Project saved to Downloads" });
+        return;
+      }
+
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = downloadName;
+      anchor.click();
+      URL.revokeObjectURL(objectUrl);
+      toast({ title: "Project ZIP downloaded" });
+    } catch {
+      toast({ title: "Save project failed", variant: "destructive" });
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 600) {
+        await new Promise((resolve) => window.setTimeout(resolve, 600 - elapsed));
+      }
+      setIsSavingProject(false);
+    }
+  };
+
   const renderSettingsFooter = () => (
     <div className="mt-auto border-t border-sidebar-border p-2">
+      {projectId && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mb-2 w-full justify-start gap-3 border-primary bg-primary px-3 py-2 text-[13.5px] font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90"
+          disabled={isSavingProject}
+          onClick={() => void handleSaveProject()}
+        >
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary-foreground/20 text-primary-foreground">
+            {isSavingProject ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
+          </span>
+          <span className="flex flex-col items-start leading-tight">
+            <span className="text-sm font-semibold text-primary-foreground">{isSavingProject ? "Saving Project..." : "Save Project"}</span>
+            <span className="text-[11px] text-primary-foreground/80">Download project ZIP</span>
+          </span>
+        </Button>
+      )}
       <Dialog
         open={isSettingsOpen}
         onOpenChange={(open) => {

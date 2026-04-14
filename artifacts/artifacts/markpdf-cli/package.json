@@ -1,0 +1,42 @@
+{
+  "name": "@workspace/markpdf-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal local Markdown-to-PDF CLI that opens a localhost UI",
+  "bin": {
+    "markpdf": "dist/markpdf.cjs"
+  },
+  "files": [
+    "dist",
+    "public",
+    "installer"
+  ],
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "node ./build.mjs",
+    "start": "node ./dist/markpdf.cjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dist:win": "pnpm run build && pkg dist/markpdf.cjs --targets node20-win-x64 --output out/markpdf.exe"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "markdownlint": "^0.38.0",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "esbuild": "^0.27.3",
+    "pkg": "^5.8.1",
+    "tsx": "catalog:",
+    "typescript": "~5.9.2"
+  },
+  "pkg": {
+    "assets": [
+      "public/**/*"
+    ]
+  }
+}
