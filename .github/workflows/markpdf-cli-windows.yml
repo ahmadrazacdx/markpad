@@ -75,8 +75,20 @@ jobs:
           $outputExe = Join-Path $outDir "markpad.exe"
           $iconPath = Join-Path $pkgRoot "public\markpdf-installer.ico"
           $scriptPath = Join-Path $pkgRoot "installer\markpdf-installer.nsi"
+          $makeNsis = (Get-Command makensis -ErrorAction SilentlyContinue)?.Source
 
-          makensis /DAPP_OUT_DIR=$outDir /DOUTPUT_EXE=$outputExe /DBRAND_ICON=$iconPath $scriptPath
+          if (-not $makeNsis) {
+            $candidate = "C:\Program Files (x86)\NSIS\makensis.exe"
+            if (Test-Path $candidate) {
+              $makeNsis = $candidate
+            }
+          }
+
+          if (-not $makeNsis) {
+            throw "makensis.exe not found after NSIS installation"
+          }
+
+          & $makeNsis /DAPP_OUT_DIR=$outDir /DOUTPUT_EXE=$outputExe /DBRAND_ICON=$iconPath $scriptPath
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
