@@ -111,7 +111,7 @@ Function AddToMachinePath
   Pop $0
 FunctionEnd
 
-Function RemoveFromUserPath
+Function un.RemoveFromUserPath
   Exch $0
   ReadRegStr $1 HKCU "Environment" "Path"
   StrCmp $1 "" done_remove
@@ -171,7 +171,7 @@ Function RemoveFromUserPath
   Pop $0
 FunctionEnd
 
-Function RemoveFromMachinePath
+Function un.RemoveFromMachinePath
   Exch $0
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
   StrCmp $1 "" done_remove_machine
@@ -271,8 +271,8 @@ Section "Uninstall"
   DeleteRegKey HKCU "Software\MarkPDF CLI"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI"
   Push "$INSTDIR"
-  Call RemoveFromMachinePath
+  Call un.RemoveFromMachinePath
 
   Push "$INSTDIR"
-  Call RemoveFromUserPath
+  Call un.RemoveFromUserPath
 SectionEnd
