@@ -35,4 +35,15 @@ pnpm --filter @workspace/markpdf-cli run build
 pnpm --filter @workspace/markpdf-cli run dist:win
 ```
 
-This creates `out/markpdf.exe`.
+_This creates `out/markpdf-cli.exe` (internal CLI payload used by the installer pipeline).
+
+The Windows CI workflow packages this payload together with `pandoc.exe` into a single installer executable:
+
+- `out/markpdf.exe`
+
+After installing, open a new terminal session and run:
+
+- `markpdf --version`
+- `markpdf --help`
+- `markpdf`
+- `markpdf uninstall`

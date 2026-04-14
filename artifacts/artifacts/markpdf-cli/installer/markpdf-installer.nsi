@@ -18,12 +18,16 @@ ${UnStrRep}
 !define BRAND_ICON "..\public\markpdf-installer.ico"
 !endif
 
+!ifndef CLI_EXE
+!define CLI_EXE "markpdf.exe"
+!endif
+
 Name "MarkPDF CLI"
 OutFile "${OUTPUT_EXE}"
 Icon "${BRAND_ICON}"
 UninstallIcon "${BRAND_ICON}"
 InstallDir "$PROGRAMFILES\MarkPDF CLI"
-InstallDirRegKey HKCU "Software\MarkPDF CLI" "InstallDir"
+InstallDirRegKey HKLM "Software\MarkPDF CLI" "InstallDir"
 RequestExecutionLevel admin
 Unicode True
 SetCompressor /SOLID lzma
@@ -203,12 +207,14 @@ Function un.BroadcastEnvironmentChange
 FunctionEnd
 
 Section "Install"
+  SetRegView 64
+  SetShellVarContext all
   SetOutPath "$INSTDIR"
-  File "${APP_OUT_DIR}\markpdf.exe"
+  File "/oname=markpdf.exe" "${APP_OUT_DIR}\${CLI_EXE}"
   File "${APP_OUT_DIR}\pandoc.exe"
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKCU "Software\MarkPDF CLI" "InstallDir" "$INSTDIR"
+  WriteRegStr HKLM "Software\MarkPDF CLI" "InstallDir" "$INSTDIR"
 
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "DisplayName" "MarkPDF CLI"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "UninstallString" '"$INSTDIR\Uninstall.exe"'
@@ -218,11 +224,11 @@ Section "Install"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "NoRepair" 1
 
-  Push "$INSTDIR"
-  Call AddToMachinePath
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\markpdf.exe" "" "$INSTDIR\markpdf.exe"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\markpdf.exe" "Path" "$INSTDIR"
 
   Push "$INSTDIR"
-  Call AddToUserPath
+  Call AddToMachinePath
 
   CreateDirectory "$SMPROGRAMS\MarkPDF CLI"
   CreateShortcut "$SMPROGRAMS\MarkPDF CLI\MarkPDF CLI.lnk" "$INSTDIR\markpdf.exe"
@@ -230,6 +236,8 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
+  SetRegView 64
+  SetShellVarContext all
   Delete "$SMPROGRAMS\MarkPDF CLI\MarkPDF CLI.lnk"
   Delete "$SMPROGRAMS\MarkPDF CLI\Uninstall MarkPDF CLI.lnk"
   RMDir "$SMPROGRAMS\MarkPDF CLI"
@@ -240,6 +248,8 @@ Section "Uninstall"
   RMDir "$INSTDIR"
 
   DeleteRegKey HKCU "Software\MarkPDF CLI"
+  DeleteRegKey HKLM "Software\MarkPDF CLI"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\markpdf.exe"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI"
   Push "$INSTDIR"
   Call un.RemoveFromMachinePath

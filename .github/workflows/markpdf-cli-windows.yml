@@ -38,14 +38,7 @@ jobs:
 
       - name: Build Windows executable
         working-directory: artifacts/artifacts/markpdf-cli
-        run: pnpm exec pkg dist/markpdf.cjs --targets node18-win-x64 --output out/markpdf.exe
-
-      - name: Set Windows executable icon
-        shell: pwsh
-        working-directory: artifacts/artifacts/markpdf-cli
-        run: |
-          $ErrorActionPreference = "Stop"
-          pnpm dlx resedit-cli --in out/markpdf.exe --out out/markpdf.exe --icon public/markpdf-installer.ico
+        run: pnpm exec pkg dist/markpdf.cjs --targets node18-win-x64 --output out/markpdf-cli.exe
 
       - name: Download pandoc.exe
         shell: pwsh
@@ -79,7 +72,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $pkgRoot = (Get-Location).Path
           $outDir = Join-Path $pkgRoot "out"
-          $outputExe = Join-Path $outDir "markpdf-installer.exe"
+          $outputExe = Join-Path $outDir "markpdf.exe"
           $iconPath = Join-Path $pkgRoot "public\markpdf-installer.ico"
           $scriptPath = Join-Path $pkgRoot "installer\markpdf-installer.nsi"
           $makeNsis = (Get-Command makensis -ErrorAction SilentlyContinue)?.Source
@@ -95,15 +88,13 @@ jobs:
             throw "makensis.exe not found after NSIS installation"
           }
 
-          & $makeNsis /DAPP_OUT_DIR=$outDir /DOUTPUT_EXE=$outputExe /DBRAND_ICON=$iconPath $scriptPath
+          & $makeNsis /DAPP_OUT_DIR=$outDir /DOUTPUT_EXE=$outputExe /DCLI_EXE=markpdf-cli.exe /DBRAND_ICON=$iconPath $scriptPath
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: markpdf-cli-windows-${{ github.sha }}
-          path: |
-            artifacts/artifacts/markpdf-cli/out/markpdf-installer.exe
-            artifacts/artifacts/markpdf-cli/out/markpdf.exe
+          path: artifacts/artifacts/markpdf-cli/out/markpdf.exe
           if-no-files-found: error
 
       - name: Publish GitHub Release (tags only)
@@ -112,7 +103,5 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: |
-            artifacts/artifacts/markpdf-cli/out/markpdf-installer.exe
-            artifacts/artifacts/markpdf-cli/out/markpdf.exe
+          files: artifacts/artifacts/markpdf-cli/out/markpdf.exe
           fail_on_unmatched_files: true
