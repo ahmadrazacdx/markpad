@@ -17,7 +17,7 @@
     "build": "node ./build.mjs",
     "start": "node ./dist/markpdf.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dist:win": "pnpm run build && pkg dist/markpdf.cjs --targets node18-win-x64 --output out/markpdf-cli.exe"
+    "dist:win": "pnpm run build && pkg dist/markpdf.cjs --targets node18-win-x64 --icon public/markpdf-installer.ico --output out/markpdf-cli.exe"
   },
   "dependencies": {
     "fflate": "^0.8.2",

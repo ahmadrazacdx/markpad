@@ -53,7 +53,7 @@ const DEFAULT_SETTINGS: ConvertSettings = {
 
 function IconFile() {
   return (
-    <img src="/markpdf-logo.svg" alt="MarkPDF" width={26} height={26} />
+    <img className="brand-logo" src="/markpdf-logo.svg" alt="MarkPDF" width={34} height={34} />
   );
 }
 

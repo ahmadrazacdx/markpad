@@ -53,6 +53,13 @@ body {
   gap: 0.6rem;
 }
 
+.brand-logo {
+  width: 34px;
+  height: 34px;
+  display: block;
+  flex: 0 0 auto;
+}
+
 .brand h1 {
   margin: 0;
   font-size: 1.08rem;

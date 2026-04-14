@@ -236,6 +236,7 @@ markpdf --help
 markpdf
 markpdf uninstall
 ```
+>**Note**: Open terminal in same folder where you install markpdf, otherwise it throws errors. (global behavior will be available soon.)
 
 ### MarkPDF at a glance
 

@@ -38,7 +38,7 @@ jobs:
 
       - name: Build Windows executable
         working-directory: artifacts/artifacts/markpdf-cli
-        run: pnpm exec pkg dist/markpdf.cjs --targets node18-win-x64 --output out/markpdf-cli.exe
+        run: pnpm exec pkg dist/markpdf.cjs --targets node18-win-x64 --icon public/markpdf-installer.ico --output out/markpdf-cli.exe
 
       - name: Download pandoc.exe
         shell: pwsh

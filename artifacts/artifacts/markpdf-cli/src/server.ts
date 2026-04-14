@@ -9,7 +9,7 @@ import {
   stat,
   writeFile
 } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { unzipSync, zipSync } from "fflate";
@@ -84,7 +84,7 @@ const FILE_EXTENSIONS = new Set([".md", ".markdown"]);
 const DEFAULT_CONCURRENCY = 4;
 const ARCHIVE_EXTRACT_CONCURRENCY = 16;
 const FAST_ZIP_LEVEL = 0;
-const DEFAULT_PDF_ENGINES = ["xelatex", "lualatex", "pdflatex", "tectonic", "typst"];
+const DEFAULT_PDF_ENGINES = ["pdflatex", "xelatex", "lualatex", "tectonic", "typst"];
 const LATEX_ENGINES = new Set(["xelatex", "lualatex", "pdflatex", "tectonic"]);
 const DEFAULT_SETTINGS: ConvertSettings = {
   pageSize: "a4",
@@ -105,6 +105,8 @@ const UNICODE_FALLBACK_MAP: Record<string, string> = {
 };
 const artifacts = new Map<string, DownloadArtifact>();
 let pandocLatexHeaderPath: string | null = null;
+let availablePdfEnginesCache: string[] | null = null;
+let lastSuccessfulPdfEngine: string | null = null;
 
 const modulePath = typeof __dirname === "string" ? __dirname : process.cwd();
 
@@ -352,7 +354,22 @@ function pandocVariableArgs(settings: ConvertSettings, engine?: string): string[
 function resolvePdfEngines(): string[] {
   const envValue = process.env.MARKPDF_PDF_ENGINES;
   if (!envValue) {
-    return DEFAULT_PDF_ENGINES;
+    if (availablePdfEnginesCache) {
+      return availablePdfEnginesCache;
+    }
+
+    const commandLocator = process.platform === "win32" ? "where" : "which";
+    const available = DEFAULT_PDF_ENGINES.filter((engine) => {
+      const probe = spawnSync(commandLocator, [engine], {
+        stdio: "ignore",
+        timeout: 800
+      });
+
+      return probe.status === 0;
+    });
+
+    availablePdfEnginesCache = available.length > 0 ? available : DEFAULT_PDF_ENGINES;
+    return availablePdfEnginesCache;
   }
 
   const parsed = envValue
@@ -369,6 +386,63 @@ function sanitizeForPdfLatex(input: string): string {
 
 function isLatexEngine(engine: string): boolean {
   return LATEX_ENGINES.has(engine);
+}
+
+function buildEngineFallbackChain(): string[] {
+  const candidates = [...new Set(resolvePdfEngines())];
+  if (candidates.length === 0) {
+    return ["pdflatex", "xelatex"];
+  }
+
+  let primary = candidates[0];
+  if (lastSuccessfulPdfEngine && candidates.includes(lastSuccessfulPdfEngine)) {
+    primary = lastSuccessfulPdfEngine;
+  } else if (candidates.includes("pdflatex")) {
+    primary = "pdflatex";
+  }
+
+  const chain = [primary];
+  if (primary === "pdflatex" && candidates.includes("xelatex")) {
+    chain.push("xelatex");
+  }
+
+  for (const engine of candidates) {
+    if (chain.length >= 2) {
+      break;
+    }
+    if (!chain.includes(engine)) {
+      chain.push(engine);
+    }
+  }
+
+  return chain;
+}
+
+function shouldFallbackToNextEngine(engine: string, reason: string): boolean {
+  const lower = reason.toLowerCase();
+  const missingEngine =
+    lower.includes("unknown pdf engine") ||
+    lower.includes("not found") ||
+    lower.includes("no such file") ||
+    lower.includes("is not recognized as an internal or external command") ||
+    lower.includes("could not find executable");
+
+  if (missingEngine) {
+    return true;
+  }
+
+  if (engine === "pdflatex") {
+    return (
+      lower.includes("unicode character") ||
+      lower.includes("inputenc") ||
+      lower.includes("utf-8") ||
+      lower.includes("utf8") ||
+      lower.includes("not set up for use with latex") ||
+      lower.includes("missing character")
+    );
+  }
+
+  return false;
 }
 
 async function ensurePandocLatexHeaderFile(): Promise<string> {
@@ -461,25 +535,42 @@ async function runPandocWithFallback(
   cwd?: string,
   resourcePaths?: string[]
 ): Promise<string> {
-  const engines = resolvePdfEngines();
+  const engines = buildEngineFallbackChain();
   const errors: string[] = [];
+  logs.push(`[${fileName}] engine chain: ${engines.join(" -> ")}`);
 
-  for (const engine of engines) {
+  for (let i = 0; i < engines.length; i += 1) {
+    const engine = engines[i];
+    const hasNextEngine = i < engines.length - 1;
+
     try {
       await runPandocWithEngine(markdownPath, pdfPath, engine, settings, cwd, resourcePaths);
+      lastSuccessfulPdfEngine = engine;
       logs.push(`[${fileName}] rendered with ${engine}`);
       return engine;
     } catch (error) {
-      const reason = error instanceof Error ? error.message.split("\n")[0] : String(error);
+      const fullReason = error instanceof Error ? error.message : String(error);
+      const reason = fullReason.split("\n")[0];
       errors.push(`${engine}: ${reason}`);
 
+      if (engine === "pdflatex" && hasNextEngine) {
+        logs.push(`[${fileName}] ${engine} failed, falling back to ${engines[i + 1]}`);
+        continue;
+      }
+
       if (engine === "pdflatex" && /unicode character/i.test(reason)) {
+        if (hasNextEngine) {
+          logs.push(`[${fileName}] ${engine} unicode issue, falling back to ${engines[i + 1]}`);
+          continue;
+        }
+
         try {
           const original = await readFile(markdownPath, "utf8");
           const sanitized = sanitizeForPdfLatex(original);
           const fallbackMarkdownPath = `${markdownPath}.pdflatex-sanitized.md`;
           await writeFile(fallbackMarkdownPath, sanitized, "utf8");
           await runPandocWithEngine(fallbackMarkdownPath, pdfPath, "pdflatex", settings, cwd, resourcePaths);
+          lastSuccessfulPdfEngine = "pdflatex";
           logs.push(`[${fileName}] rendered with pdflatex after unicode sanitization`);
           return "pdflatex-sanitized";
         } catch (sanitizeError) {
@@ -487,16 +578,21 @@ async function runPandocWithFallback(
           errors.push(`pdflatex-sanitized: ${sanitizeReason}`);
         }
       }
-    }
-  }
 
-  try {
-    await runPandoc(markdownPath, pdfPath, settings, cwd, resourcePaths);
-    logs.push(`[${fileName}] rendered with pandoc default engine`);
-    return "pandoc-default";
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    errors.push(`pandoc-default: ${reason.split("\n")[0]}`);
+      if (hasNextEngine && shouldFallbackToNextEngine(engine, fullReason)) {
+        logs.push(`[${fileName}] ${engine} failed, falling back to ${engines[i + 1]}`);
+        continue;
+      }
+
+      throw new RequestError(
+        `Error producing PDF for ${fileName}`,
+        422,
+        {
+          details: errors.slice(0, 8),
+          logs
+        }
+      );
+    }
   }
 
   throw new RequestError(
