@@ -1,11 +1,12 @@
 !include "MUI2.nsh"
+!include "EnvVarUpdate.nsh"
 
 !ifndef APP_OUT_DIR
 !define APP_OUT_DIR "..\out"
 !endif
 
 !ifndef OUTPUT_EXE
-!define OUTPUT_EXE "..\out\markpad.exe"
+!define OUTPUT_EXE "..\out\markpdf.exe"
 !endif
 
 !ifndef BRAND_ICON
@@ -52,6 +53,8 @@ Section "Install"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "NoRepair" 1
 
+  ${EnvVarUpdate} $0 "PATH" "A" "HKCU" "$INSTDIR"
+
   CreateDirectory "$SMPROGRAMS\MarkPDF CLI"
   CreateShortcut "$SMPROGRAMS\MarkPDF CLI\MarkPDF CLI.lnk" "$INSTDIR\markpdf.exe"
   CreateShortcut "$SMPROGRAMS\MarkPDF CLI\Uninstall MarkPDF CLI.lnk" "$INSTDIR\Uninstall.exe"
@@ -69,4 +72,5 @@ Section "Uninstall"
 
   DeleteRegKey HKCU "Software\MarkPDF CLI"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI"
+  ${EnvVarUpdate} $0 "PATH" "R" "HKCU" "$INSTDIR"
 SectionEnd
