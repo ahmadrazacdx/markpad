@@ -42,18 +42,44 @@ async function runUninstall(): Promise<void> {
 
   process.stdout.write("Launching MarkPDF uninstaller...\n");
 
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(uninstallPath, [], { stdio: "inherit" });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
+  const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+  const comSpecCandidates = [
+    process.env.ComSpec,
+    join(systemRoot, "System32", "cmd.exe"),
+    join(systemRoot, "Sysnative", "cmd.exe")
+  ].filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
 
-      reject(new Error(`Uninstaller exited with code ${code ?? "unknown"}`));
-    });
-  });
+  let launched = false;
+  let lastError: unknown = null;
+
+  for (const command of [...new Set(comSpecCandidates)]) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(command, ["/d", "/s", "/c", "start", "", uninstallPath], {
+          stdio: "ignore"
+        });
+
+        child.once("error", reject);
+        child.once("close", (code) => {
+          if (code === 0) {
+            resolve();
+            return;
+          }
+
+          reject(new Error(`launcher exited with code ${code ?? "unknown"}`));
+        });
+      });
+
+      launched = true;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!launched) {
+    throw new Error(`Unable to launch uninstaller${lastError instanceof Error ? `: ${lastError.message}` : ""}`);
+  }
 }
 
 function openBrowser(url: string): void {

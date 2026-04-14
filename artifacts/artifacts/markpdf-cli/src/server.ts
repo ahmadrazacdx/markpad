@@ -108,21 +108,13 @@ let pandocLatexHeaderPath: string | null = null;
 
 const modulePath = typeof __dirname === "string" ? __dirname : process.cwd();
 
-function publicPath(fileName: string): string {
-  const candidates = [
+function publicCandidates(fileName: string): string[] {
+  return [
+    join(dirname(process.execPath), "public", fileName),
     join(modulePath, "../public", fileName),
     join(modulePath, "../../public", fileName),
-    join(process.cwd(), "public", fileName),
-    join(dirname(process.execPath), "public", fileName)
+    join(process.cwd(), "public", fileName)
   ];
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return candidates[0];
 }
 
 function normalizeRelativePath(input: string, label: string): string {
@@ -607,8 +599,24 @@ function sendJson(res: ServerResponse, statusCode: number, payload: unknown): vo
 }
 
 async function sendStatic(res: ServerResponse, fileName: string, contentType: string): Promise<void> {
-  const filePath = publicPath(fileName);
-  const content = await readFile(filePath);
+  let content: Buffer | null = null;
+  let lastError: unknown = null;
+
+  for (const candidate of publicCandidates(fileName)) {
+    try {
+      content = await readFile(candidate);
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!content) {
+    throw new Error(
+      `Static asset '${fileName}' is unavailable. Reinstall MarkPDF to ensure public assets were deployed.${lastError instanceof Error ? ` (${lastError.message})` : ""}`
+    );
+  }
+
   res.writeHead(200, {
     "Content-Type": `${contentType}; charset=utf-8`,
     "Cache-Control": "no-store"

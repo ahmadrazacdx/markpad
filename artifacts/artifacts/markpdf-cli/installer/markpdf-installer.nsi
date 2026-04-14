@@ -213,6 +213,13 @@ Section "Install"
   File "/oname=markpdf.exe" "${APP_OUT_DIR}\${CLI_EXE}"
   File "${APP_OUT_DIR}\pandoc.exe"
 
+  SetOutPath "$INSTDIR\public"
+  File "..\public\index.html"
+  File "..\public\styles.css"
+  File "..\public\app.js"
+  File "..\public\markpdf-logo.svg"
+  SetOutPath "$INSTDIR"
+
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\MarkPDF CLI" "InstallDir" "$INSTDIR"
 
@@ -226,9 +233,14 @@ Section "Install"
 
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\markpdf.exe" "" "$INSTDIR\markpdf.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\markpdf.exe" "Path" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\App Paths\markpdf.exe" "" "$INSTDIR\markpdf.exe"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\App Paths\markpdf.exe" "Path" "$INSTDIR"
 
   Push "$INSTDIR"
   Call AddToMachinePath
+
+  Push "$INSTDIR"
+  Call AddToUserPath
 
   CreateDirectory "$SMPROGRAMS\MarkPDF CLI"
   CreateShortcut "$SMPROGRAMS\MarkPDF CLI\MarkPDF CLI.lnk" "$INSTDIR\markpdf.exe"
@@ -244,12 +256,14 @@ Section "Uninstall"
 
   Delete "$INSTDIR\markpdf.exe"
   Delete "$INSTDIR\pandoc.exe"
+  RMDir /r "$INSTDIR\public"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
 
   DeleteRegKey HKCU "Software\MarkPDF CLI"
   DeleteRegKey HKLM "Software\MarkPDF CLI"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\markpdf.exe"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\App Paths\markpdf.exe"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI"
   Push "$INSTDIR"
   Call un.RemoveFromMachinePath
