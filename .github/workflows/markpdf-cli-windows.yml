@@ -40,6 +40,13 @@ jobs:
         working-directory: artifacts/artifacts/markpdf-cli
         run: pnpm exec pkg dist/markpdf.cjs --targets node18-win-x64 --output out/markpdf.exe
 
+      - name: Set Windows executable icon
+        shell: pwsh
+        working-directory: artifacts/artifacts/markpdf-cli
+        run: |
+          $ErrorActionPreference = "Stop"
+          pnpm dlx rcedit out/markpdf.exe --set-icon public/markpdf-installer.ico
+
       - name: Download pandoc.exe
         shell: pwsh
         working-directory: artifacts/artifacts/markpdf-cli
@@ -72,7 +79,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $pkgRoot = (Get-Location).Path
           $outDir = Join-Path $pkgRoot "out"
-          $outputExe = Join-Path $outDir "markpdf.exe"
+          $outputExe = Join-Path $outDir "markpdf-installer.exe"
           $iconPath = Join-Path $pkgRoot "public\markpdf-installer.ico"
           $scriptPath = Join-Path $pkgRoot "installer\markpdf-installer.nsi"
           $makeNsis = (Get-Command makensis -ErrorAction SilentlyContinue)?.Source
@@ -95,6 +102,7 @@ jobs:
         with:
           name: markpdf-cli-windows-${{ github.sha }}
           path: |
+            artifacts/artifacts/markpdf-cli/out/markpdf-installer.exe
             artifacts/artifacts/markpdf-cli/out/markpdf.exe
           if-no-files-found: error
 
@@ -105,5 +113,6 @@ jobs:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
+            artifacts/artifacts/markpdf-cli/out/markpdf-installer.exe
             artifacts/artifacts/markpdf-cli/out/markpdf.exe
           fail_on_unmatched_files: true

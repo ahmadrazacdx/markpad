@@ -1,5 +1,9 @@
 !include "MUI2.nsh"
 !include "WinMessages.nsh"
+!include "StrFunc.nsh"
+
+${StrStr}
+${StrRep}
 
 !ifndef APP_OUT_DIR
 !define APP_OUT_DIR "..\out"
@@ -39,34 +43,27 @@ SetCompressor /SOLID lzma
 
 Function AddToUserPath
   Exch $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+
   ReadRegStr $1 HKCU "Environment" "Path"
-
-  StrCmp $1 "" 0 +2
-  StrCpy $1 ""
-
-  StrCpy $2 "$1;"
-  StrCpy $3 "$0;"
-  StrLen $4 $2
-  loop_check_add:
-    StrCmp $4 0 add_path
-    StrCpy $5 $2 $4
-    StrCmp $5 $3 done_add
-    IntOp $4 $4 - 1
-    Goto loop_check_add
-
-  add_path:
-    StrCmp $1 "" 0 +2
+  StrCmp $1 "" 0 +3
     StrCpy $1 "$0"
-    StrCmp $1 "$0" write_path
-    StrCpy $1 "$1;$0"
+    Goto write_user_path
 
-  write_path:
+  StrCpy $2 ";$1;"
+  StrCpy $3 ";$0;"
+  ${StrStr} $4 "$2" "$3"
+  StrCmp $4 "" 0 done_add_user
+  StrCpy $1 "$1;$0"
+
+  write_user_path:
     WriteRegExpandStr HKCU "Environment" "Path" $1
-    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i("PATH", "$1")'
-    System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
+    Call BroadcastEnvironmentChange
 
-  done_add:
-  Pop $5
+  done_add_user:
   Pop $4
   Pop $3
   Pop $2
@@ -76,34 +73,27 @@ FunctionEnd
 
 Function AddToMachinePath
   Exch $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-
-  StrCmp $1 "" 0 +2
-  StrCpy $1 ""
-
-  StrCpy $2 "$1;"
-  StrCpy $3 "$0;"
-  StrLen $4 $2
-  loop_check_add_machine:
-    StrCmp $4 0 add_path_machine
-    StrCpy $5 $2 $4
-    StrCmp $5 $3 done_add_machine
-    IntOp $4 $4 - 1
-    Goto loop_check_add_machine
-
-  add_path_machine:
-    StrCmp $1 "" 0 +2
+  StrCmp $1 "" 0 +3
     StrCpy $1 "$0"
-    StrCmp $1 "$0" write_path_machine
-    StrCpy $1 "$1;$0"
+    Goto write_machine_path
 
-  write_path_machine:
+  StrCpy $2 ";$1;"
+  StrCpy $3 ";$0;"
+  ${StrStr} $4 "$2" "$3"
+  StrCmp $4 "" 0 done_add_machine
+  StrCpy $1 "$1;$0"
+
+  write_machine_path:
     WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" $1
-    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i("PATH", "$1")'
-    System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
+    Call BroadcastEnvironmentChange
 
   done_add_machine:
-  Pop $5
   Pop $4
   Pop $3
   Pop $2
@@ -113,56 +103,42 @@ FunctionEnd
 
 Function un.RemoveFromUserPath
   Exch $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+
   ReadRegStr $1 HKCU "Environment" "Path"
-  StrCmp $1 "" done_remove
+  StrCmp $1 "" done_remove_user
 
-  StrCpy $2 "$1"
-  StrCpy $3 "$0;"
-  StrLen $4 $2
+  StrCpy $2 ";$1;"
+  StrCpy $3 ";$0;"
+  ${StrRep} $2 "$2" "$3" ";"
 
-  loop_remove:
-    StrCmp $4 0 try_exact
-    StrCpy $5 $2 $4
-    StrCmp $5 $3 found_remove
-    IntOp $4 $4 - 1
-    Goto loop_remove
+  normalize_user_path:
+    ${StrRep} $4 "$2" ";;" ";"
+    StrCmp $4 "$2" trim_user_path
+    StrCpy $2 "$4"
+    Goto normalize_user_path
 
-  try_exact:
-    StrCmp $2 $0 remove_exact done_remove
+  trim_user_path:
+    StrCpy $5 $2 1
+    StrCmp $5 ";" 0 +2
+    StrCpy $2 $2 "" 1
 
-  found_remove:
-    StrLen $6 $3
-    StrLen $7 $2
-    IntOp $8 $7 - $6
-    StrCpy $9 $2 $4
-    StrCpy $R0 $2 $8 $6
-    StrCmp $9 "" 0 +2
-    StrCpy $9 ""
-    StrCmp $R0 "" 0 +2
-    StrCpy $R0 ""
-    StrCmp $9 "" 0 +2
-    StrCpy $1 $R0
-    StrCmp $R0 "" 0 +2
-    StrCpy $1 $9
-    StrCmp $9 "" +2
-    StrCmp $R0 "" +2
-    StrCpy $1 "$9$R0"
-    Goto write_remove
+    StrCmp $2 "" write_remove_user
+    StrLen $5 $2
+    IntOp $5 $5 - 1
+    StrCpy $4 $2 1 $5
+    StrCmp $4 ";" 0 +2
+    StrCpy $2 $2 $5
 
-  remove_exact:
-    StrCpy $1 ""
+  write_remove_user:
+    WriteRegExpandStr HKCU "Environment" "Path" $2
+    Call BroadcastEnvironmentChange
 
-  write_remove:
-    WriteRegExpandStr HKCU "Environment" "Path" $1
-    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i("PATH", "$1")'
-    System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
-
-  done_remove:
-  Pop $R0
-  Pop $9
-  Pop $8
-  Pop $7
-  Pop $6
+  done_remove_user:
   Pop $5
   Pop $4
   Pop $3
@@ -173,62 +149,52 @@ FunctionEnd
 
 Function un.RemoveFromMachinePath
   Exch $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
   StrCmp $1 "" done_remove_machine
 
-  StrCpy $2 "$1"
-  StrCpy $3 "$0;"
-  StrLen $4 $2
+  StrCpy $2 ";$1;"
+  StrCpy $3 ";$0;"
+  ${StrRep} $2 "$2" "$3" ";"
 
-  loop_remove_machine:
-    StrCmp $4 0 try_exact_machine
-    StrCpy $5 $2 $4
-    StrCmp $5 $3 found_remove_machine
-    IntOp $4 $4 - 1
-    Goto loop_remove_machine
+  normalize_machine_path:
+    ${StrRep} $4 "$2" ";;" ";"
+    StrCmp $4 "$2" trim_machine_path
+    StrCpy $2 "$4"
+    Goto normalize_machine_path
 
-  try_exact_machine:
-    StrCmp $2 $0 remove_exact_machine done_remove_machine
+  trim_machine_path:
+    StrCpy $5 $2 1
+    StrCmp $5 ";" 0 +2
+    StrCpy $2 $2 "" 1
 
-  found_remove_machine:
-    StrLen $6 $3
-    StrLen $7 $2
-    IntOp $8 $7 - $6
-    StrCpy $9 $2 $4
-    StrCpy $R0 $2 $8 $6
-    StrCmp $9 "" 0 +2
-    StrCpy $9 ""
-    StrCmp $R0 "" 0 +2
-    StrCpy $R0 ""
-    StrCmp $9 "" 0 +2
-    StrCpy $1 $R0
-    StrCmp $R0 "" 0 +2
-    StrCpy $1 $9
-    StrCmp $9 "" +2
-    StrCmp $R0 "" +2
-    StrCpy $1 "$9$R0"
-    Goto write_remove_machine
-
-  remove_exact_machine:
-    StrCpy $1 ""
+    StrCmp $2 "" write_remove_machine
+    StrLen $5 $2
+    IntOp $5 $5 - 1
+    StrCpy $4 $2 1 $5
+    StrCmp $4 ";" 0 +2
+    StrCpy $2 $2 $5
 
   write_remove_machine:
-    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" $1
-    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i("PATH", "$1")'
-    System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
+    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" $2
+    Call BroadcastEnvironmentChange
 
   done_remove_machine:
-  Pop $R0
-  Pop $9
-  Pop $8
-  Pop $7
-  Pop $6
   Pop $5
   Pop $4
   Pop $3
   Pop $2
   Pop $1
   Pop $0
+FunctionEnd
+
+Function BroadcastEnvironmentChange
+  System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
 FunctionEnd
 
 Section "Install"

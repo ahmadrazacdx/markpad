@@ -60,13 +60,47 @@ function openBrowser(url: string): void {
   const detached = { detached: true, stdio: "ignore" as const };
 
   if (process.platform === "win32") {
-    const child = spawn("cmd", ["/c", "start", "", url], detached);
-    child.unref();
+    const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+    const comSpecCandidates = [
+      process.env.ComSpec,
+      join(systemRoot, "System32", "cmd.exe"),
+      join(systemRoot, "Sysnative", "cmd.exe")
+    ].filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+
+    const windowsLaunchers: Array<readonly [string, readonly string[]]> = [
+      ...new Set(comSpecCandidates)
+    ].map((command) => [command, ["/d", "/s", "/c", "start", "", url]] as const);
+
+    windowsLaunchers.push(["rundll32", ["url.dll,FileProtocolHandler", url]] as const);
+
+    const launchWithFallback = (index: number): void => {
+      if (index >= windowsLaunchers.length) {
+        process.stderr.write("Unable to launch a browser automatically. Open this URL manually:\n");
+        process.stderr.write(`${url}\n`);
+        return;
+      }
+
+      const [command, args] = windowsLaunchers[index];
+
+      try {
+        const child = spawn(command, args, detached);
+        child.once("error", () => launchWithFallback(index + 1));
+        child.unref();
+      } catch {
+        launchWithFallback(index + 1);
+      }
+    };
+
+    launchWithFallback(0);
     return;
   }
 
   if (process.platform === "darwin") {
     const child = spawn("open", [url], detached);
+    child.on("error", () => {
+      process.stderr.write("Unable to launch a browser automatically. Open this URL manually:\n");
+      process.stderr.write(`${url}\n`);
+    });
     child.unref();
     return;
   }
@@ -84,6 +118,10 @@ function openBrowser(url: string): void {
     }
 
     const child = spawn(command, args, detached);
+    child.on("error", () => {
+      process.stderr.write("Unable to launch a browser automatically. Open this URL manually:\n");
+      process.stderr.write(`${url}\n`);
+    });
     child.unref();
     return;
   }
