@@ -74,6 +74,43 @@ Function AddToUserPath
   Pop $0
 FunctionEnd
 
+Function AddToMachinePath
+  Exch $0
+  ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+
+  StrCmp $1 "" 0 +2
+  StrCpy $1 ""
+
+  StrCpy $2 "$1;"
+  StrCpy $3 "$0;"
+  StrLen $4 $2
+  loop_check_add_machine:
+    StrCmp $4 0 add_path_machine
+    StrCpy $5 $2 $4
+    StrCmp $5 $3 done_add_machine
+    IntOp $4 $4 - 1
+    Goto loop_check_add_machine
+
+  add_path_machine:
+    StrCmp $1 "" 0 +2
+    StrCpy $1 "$0"
+    StrCmp $1 "$0" write_path_machine
+    StrCpy $1 "$1;$0"
+
+  write_path_machine:
+    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" $1
+    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i("PATH", "$1")'
+    System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
+
+  done_add_machine:
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
 Function RemoveFromUserPath
   Exch $0
   ReadRegStr $1 HKCU "Environment" "Path"
@@ -134,6 +171,66 @@ Function RemoveFromUserPath
   Pop $0
 FunctionEnd
 
+Function RemoveFromMachinePath
+  Exch $0
+  ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+  StrCmp $1 "" done_remove_machine
+
+  StrCpy $2 "$1"
+  StrCpy $3 "$0;"
+  StrLen $4 $2
+
+  loop_remove_machine:
+    StrCmp $4 0 try_exact_machine
+    StrCpy $5 $2 $4
+    StrCmp $5 $3 found_remove_machine
+    IntOp $4 $4 - 1
+    Goto loop_remove_machine
+
+  try_exact_machine:
+    StrCmp $2 $0 remove_exact_machine done_remove_machine
+
+  found_remove_machine:
+    StrLen $6 $3
+    StrLen $7 $2
+    IntOp $8 $7 - $6
+    StrCpy $9 $2 $4
+    StrCpy $R0 $2 $8 $6
+    StrCmp $9 "" 0 +2
+    StrCpy $9 ""
+    StrCmp $R0 "" 0 +2
+    StrCpy $R0 ""
+    StrCmp $9 "" 0 +2
+    StrCpy $1 $R0
+    StrCmp $R0 "" 0 +2
+    StrCpy $1 $9
+    StrCmp $9 "" +2
+    StrCmp $R0 "" +2
+    StrCpy $1 "$9$R0"
+    Goto write_remove_machine
+
+  remove_exact_machine:
+    StrCpy $1 ""
+
+  write_remove_machine:
+    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" $1
+    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i("PATH", "$1")'
+    System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
+
+  done_remove_machine:
+  Pop $R0
+  Pop $9
+  Pop $8
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
 Section "Install"
   SetOutPath "$INSTDIR"
   File "${APP_OUT_DIR}\markpdf.exe"
@@ -149,6 +246,9 @@ Section "Install"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "DisplayVersion" "0.1.0"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "NoRepair" 1
+
+  Push "$INSTDIR"
+  Call AddToMachinePath
 
   Push "$INSTDIR"
   Call AddToUserPath
@@ -170,6 +270,9 @@ Section "Uninstall"
 
   DeleteRegKey HKCU "Software\MarkPDF CLI"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI"
+  Push "$INSTDIR"
+  Call RemoveFromMachinePath
+
   Push "$INSTDIR"
   Call RemoveFromUserPath
 SectionEnd
