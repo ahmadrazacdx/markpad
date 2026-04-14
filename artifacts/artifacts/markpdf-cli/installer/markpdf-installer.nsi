@@ -1,5 +1,5 @@
 !include "MUI2.nsh"
-!include "EnvVarUpdate.nsh"
+!include "WinMessages.nsh"
 
 !ifndef APP_OUT_DIR
 !define APP_OUT_DIR "..\out"
@@ -37,6 +37,103 @@ SetCompressor /SOLID lzma
 
 !insertmacro MUI_LANGUAGE "English"
 
+Function AddToUserPath
+  Exch $0
+  ReadRegStr $1 HKCU "Environment" "Path"
+
+  StrCmp $1 "" 0 +2
+  StrCpy $1 ""
+
+  StrCpy $2 "$1;"
+  StrCpy $3 "$0;"
+  StrLen $4 $2
+  loop_check_add:
+    StrCmp $4 0 add_path
+    StrCpy $5 $2 $4
+    StrCmp $5 $3 done_add
+    IntOp $4 $4 - 1
+    Goto loop_check_add
+
+  add_path:
+    StrCmp $1 "" 0 +2
+    StrCpy $1 "$0"
+    StrCmp $1 "$0" write_path
+    StrCpy $1 "$1;$0"
+
+  write_path:
+    WriteRegExpandStr HKCU "Environment" "Path" $1
+    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i("PATH", "$1")'
+    System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
+
+  done_add:
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+Function RemoveFromUserPath
+  Exch $0
+  ReadRegStr $1 HKCU "Environment" "Path"
+  StrCmp $1 "" done_remove
+
+  StrCpy $2 "$1"
+  StrCpy $3 "$0;"
+  StrLen $4 $2
+
+  loop_remove:
+    StrCmp $4 0 try_exact
+    StrCpy $5 $2 $4
+    StrCmp $5 $3 found_remove
+    IntOp $4 $4 - 1
+    Goto loop_remove
+
+  try_exact:
+    StrCmp $2 $0 remove_exact done_remove
+
+  found_remove:
+    StrLen $6 $3
+    StrLen $7 $2
+    IntOp $8 $7 - $6
+    StrCpy $9 $2 $4
+    StrCpy $R0 $2 $8 $6
+    StrCmp $9 "" 0 +2
+    StrCpy $9 ""
+    StrCmp $R0 "" 0 +2
+    StrCpy $R0 ""
+    StrCmp $9 "" 0 +2
+    StrCpy $1 $R0
+    StrCmp $R0 "" 0 +2
+    StrCpy $1 $9
+    StrCmp $9 "" +2
+    StrCmp $R0 "" +2
+    StrCpy $1 "$9$R0"
+    Goto write_remove
+
+  remove_exact:
+    StrCpy $1 ""
+
+  write_remove:
+    WriteRegExpandStr HKCU "Environment" "Path" $1
+    System::Call 'Kernel32::SetEnvironmentVariable(t, t)i("PATH", "$1")'
+    System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
+
+  done_remove:
+  Pop $R0
+  Pop $9
+  Pop $8
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
 Section "Install"
   SetOutPath "$INSTDIR"
   File "${APP_OUT_DIR}\markpdf.exe"
@@ -53,7 +150,8 @@ Section "Install"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI" "NoRepair" 1
 
-  ${EnvVarUpdate} $0 "PATH" "A" "HKCU" "$INSTDIR"
+  Push "$INSTDIR"
+  Call AddToUserPath
 
   CreateDirectory "$SMPROGRAMS\MarkPDF CLI"
   CreateShortcut "$SMPROGRAMS\MarkPDF CLI\MarkPDF CLI.lnk" "$INSTDIR\markpdf.exe"
@@ -72,5 +170,6 @@ Section "Uninstall"
 
   DeleteRegKey HKCU "Software\MarkPDF CLI"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\MarkPDF CLI"
-  ${EnvVarUpdate} $0 "PATH" "R" "HKCU" "$INSTDIR"
+  Push "$INSTDIR"
+  Call RemoveFromUserPath
 SectionEnd
