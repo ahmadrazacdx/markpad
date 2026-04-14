@@ -4,6 +4,7 @@
 
 ${StrStr}
 ${StrRep}
+${UnStrRep}
 
 !ifndef APP_OUT_DIR
 !define APP_OUT_DIR "..\out"
@@ -114,10 +115,10 @@ Function un.RemoveFromUserPath
 
   StrCpy $2 ";$1;"
   StrCpy $3 ";$0;"
-  ${StrRep} $2 "$2" "$3" ";"
+  ${UnStrRep} $2 "$2" "$3" ";"
 
   normalize_user_path:
-    ${StrRep} $4 "$2" ";;" ";"
+    ${UnStrRep} $4 "$2" ";;" ";"
     StrCmp $4 "$2" trim_user_path
     StrCpy $2 "$4"
     Goto normalize_user_path
@@ -160,10 +161,10 @@ Function un.RemoveFromMachinePath
 
   StrCpy $2 ";$1;"
   StrCpy $3 ";$0;"
-  ${StrRep} $2 "$2" "$3" ";"
+  ${UnStrRep} $2 "$2" "$3" ";"
 
   normalize_machine_path:
-    ${StrRep} $4 "$2" ";;" ";"
+    ${UnStrRep} $4 "$2" ";;" ";"
     StrCmp $4 "$2" trim_machine_path
     StrCpy $2 "$4"
     Goto normalize_machine_path
