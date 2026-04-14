@@ -137,7 +137,7 @@ Function un.RemoveFromUserPath
 
   write_remove_user:
     WriteRegExpandStr HKCU "Environment" "Path" $2
-    Call BroadcastEnvironmentChange
+    Call un.BroadcastEnvironmentChange
 
   done_remove_user:
   Pop $5
@@ -183,7 +183,7 @@ Function un.RemoveFromMachinePath
 
   write_remove_machine:
     WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" $2
-    Call BroadcastEnvironmentChange
+    Call un.BroadcastEnvironmentChange
 
   done_remove_machine:
   Pop $5
@@ -195,6 +195,10 @@ Function un.RemoveFromMachinePath
 FunctionEnd
 
 Function BroadcastEnvironmentChange
+  System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
+FunctionEnd
+
+Function un.BroadcastEnvironmentChange
   System::Call 'User32::SendMessageTimeout(p, i, p, p, i, i, *p) p(0xffff, ${WM_SETTINGCHANGE}, 0, "STR:Environment", 0, 5000, .r0)'
 FunctionEnd
 
