@@ -84,7 +84,7 @@ const FILE_EXTENSIONS = new Set([".md", ".markdown"]);
 const DEFAULT_CONCURRENCY = 4;
 const ARCHIVE_EXTRACT_CONCURRENCY = 16;
 const FAST_ZIP_LEVEL = 0;
-const DEFAULT_PDF_ENGINES = ["pdflatex", "xelatex", "lualatex", "tectonic", "typst"];
+const DEFAULT_PDF_ENGINES = ["pdflatex", "xelatex", "lualatex", "tectonic"];
 const LATEX_ENGINES = new Set(["xelatex", "lualatex", "pdflatex", "tectonic"]);
 const DEFAULT_SETTINGS: ConvertSettings = {
   pageSize: "a4",
@@ -181,8 +181,12 @@ function validateProjectLayout(markdownPaths: string[], assetPaths: string[]): s
 
 function findPandocBinary(): string {
   const envPath = process.env.MARKPDF_PANDOC_BIN;
-  if (envPath && existsSync(envPath)) {
-    return envPath;
+  if (envPath) {
+    if (existsSync(envPath)) {
+      return envPath;
+    }
+
+    throw new Error(`MARKPDF_PANDOC_BIN points to a missing file: ${envPath}`);
   }
 
   const executableFolder = dirname(process.execPath);
@@ -200,6 +204,15 @@ function findPandocBinary(): string {
     if (existsSync(candidate)) {
       return candidate;
     }
+  }
+
+  const isLikelyInstalledCli =
+    process.platform === "win32" &&
+    (basename(process.execPath).toLowerCase() === "markpdf.exe" || typeof (process as NodeJS.Process & { pkg?: unknown }).pkg !== "undefined");
+
+  // Installed Windows builds must use the bundled pandoc.exe to avoid picking arbitrary global installations.
+  if (isLikelyInstalledCli) {
+    throw new Error("Bundled pandoc.exe was not found next to markpdf.exe. Reinstall MarkPDF CLI.");
   }
 
   return "pandoc";
@@ -410,7 +423,7 @@ function resolvePdfEngines(): string[] {
 
     const available = DEFAULT_PDF_ENGINES.filter((engine) => isEngineAvailable(engine));
 
-    availablePdfEnginesCache = available.length > 0 ? available : DEFAULT_PDF_ENGINES;
+    availablePdfEnginesCache = available;
     return availablePdfEnginesCache;
   }
 
@@ -433,7 +446,7 @@ function isLatexEngine(engine: string): boolean {
 function buildEngineFallbackChain(): string[] {
   const candidates = [...new Set(resolvePdfEngines())];
   if (candidates.length === 0) {
-    return ["pdflatex", "xelatex", "lualatex", "tectonic", "typst"];
+    return [];
   }
 
   let primary = candidates[0];
@@ -445,7 +458,7 @@ function buildEngineFallbackChain(): string[] {
 
   const chain = [primary];
   if (primary === "pdflatex") {
-    for (const preferredFallback of ["xelatex", "lualatex", "tectonic", "typst"]) {
+    for (const preferredFallback of ["xelatex", "lualatex", "tectonic"]) {
       if (candidates.includes(preferredFallback) && !chain.includes(preferredFallback)) {
         chain.push(preferredFallback);
       }
@@ -486,6 +499,23 @@ function shouldFallbackToNextEngine(engine: string, reason: string): boolean {
   }
 
   return false;
+}
+
+function summarizePandocFailure(reason: string): string {
+  const lines = reason
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  if (lines.length === 0) {
+    return "Unknown rendering error";
+  }
+
+  const nonWarningLines = lines.filter((line) => !/^\[warning\]/i.test(line));
+  const severityPattern = /(not found|unknown pdf engine|could not find executable|fatal|error|failed|no such file|not recognized)/i;
+
+  const candidates = nonWarningLines.length > 0 ? nonWarningLines : lines;
+  return candidates.find((line) => severityPattern.test(line)) ?? candidates[0];
 }
 
 async function ensurePandocLatexHeaderFile(): Promise<string> {
@@ -581,6 +611,19 @@ async function runPandocWithFallback(
 ): Promise<string> {
   const engines = buildEngineFallbackChain();
   const errors: string[] = [];
+
+  if (engines.length === 0) {
+    logs.push(`[${fileName}] no available PDF engines detected`);
+    throw new RequestError(
+      `Error producing PDF for ${fileName}`,
+      422,
+      {
+        details: ["No supported PDF engine was detected. Install one of: pdflatex, xelatex, lualatex, tectonic."],
+        logs
+      }
+    );
+  }
+
   logs.push(`[${fileName}] engine chain: ${engines.join(" -> ")}`);
 
   for (let i = 0; i < engines.length; i += 1) {
@@ -594,15 +637,10 @@ async function runPandocWithFallback(
       return engine;
     } catch (error) {
       const fullReason = error instanceof Error ? error.message : String(error);
-      const reason = fullReason.split("\n")[0];
+      const reason = summarizePandocFailure(fullReason);
       errors.push(`${engine}: ${reason}`);
 
-      if (engine === "pdflatex" && hasNextEngine) {
-        logs.push(`[${fileName}] ${engine} failed, falling back to ${engines[i + 1]}`);
-        continue;
-      }
-
-      if (engine === "pdflatex" && /unicode character/i.test(reason)) {
+      if (engine === "pdflatex" && /unicode character/i.test(fullReason)) {
         if (hasNextEngine) {
           logs.push(`[${fileName}] ${engine} unicode issue, falling back to ${engines[i + 1]}`);
           continue;

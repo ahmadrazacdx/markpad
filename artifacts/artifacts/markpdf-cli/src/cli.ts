@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
 import { startHttpUi } from "./server.js";
 
-const VERSION = "0.1.2";
+declare const __MARKPDF_VERSION__: string;
+const VERSION = __MARKPDF_VERSION__;
 
 function printHelp(): void {
   process.stdout.write(
