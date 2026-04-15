@@ -40,13 +40,13 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.ico",
+      "icons/markpad_logo.ico",
       "icons/icon.icns"
     ],
     "resources": ["resources/backend", "resources/runtime", "resources/bin"],
     "windows": {
       "nsis": {
-        "installerIcon": "icons/icon.ico",
+        "installerIcon": "icons/markpad_logo.ico",
         "headerImage": "icons/nsis-header.bmp",
         "sidebarImage": "icons/nsis-sidebar.bmp",
         "startMenuFolder": "MarkPad",

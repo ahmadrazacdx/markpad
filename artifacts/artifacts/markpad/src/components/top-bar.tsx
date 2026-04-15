@@ -136,9 +136,7 @@ export function TopBar({ projectId, selectedFile, content, preferences, onSave, 
     <header className="relative h-14 border-b border-border bg-card flex items-center justify-between px-4 shrink-0 shadow-sm z-10">
       <div className="flex items-center gap-4 min-w-0">
         <h1 className="font-bold text-lg tracking-tight text-primary flex items-center gap-2">
-          <div className="w-6 h-6 rounded-sm bg-black flex items-center justify-center shadow-sm">
-            <span className="text-white text-xs font-semibold leading-none">MP</span>
-          </div>
+          <img src="/markpad_logo.svg" alt="MarkPad logo" className="h-6 w-6 shrink-0" />
           MarkPad
         </h1>
         {stats && (
