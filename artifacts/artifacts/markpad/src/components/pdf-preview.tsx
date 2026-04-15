@@ -31,6 +31,23 @@ const previewMetricsEnabled = import.meta.env.VITE_PREVIEW_METRICS === "1";
 const previewInitialPages = parsePreviewInt(import.meta.env.VITE_PREVIEW_INITIAL_PAGES, 2, 1, 10);
 const previewRenderChunkSize = parsePreviewInt(import.meta.env.VITE_PREVIEW_RENDER_CHUNK_SIZE, 2, 1, 10);
 const previewLivePageCap = parsePreviewInt(import.meta.env.VITE_PREVIEW_LIVE_PAGE_CAP, 40, 1, 500);
+const previewErrorFlushQuietMs = parsePreviewInt(import.meta.env.VITE_PREVIEW_ERROR_FLUSH_MS, 500, 150, 3000);
+
+function normalizePreviewErrorMessage(message: string): string {
+  const compact = message.replace(/\s+/g, " ").trim();
+  if (!compact) return "Unknown preview error";
+
+  if (/^Invalid image path points to an assets directory:/i.test(compact)) {
+    return "Invalid image path points to an assets directory. Use a file path under assets/.";
+  }
+
+  return compact;
+}
+
+function createErrorFingerprint(source: PreviewErrorLog["source"], message: string): string {
+  const firstLine = message.split(/\r?\n/, 1)[0] ?? message;
+  return `${source}:${firstLine.toLowerCase()}`;
+}
 
 interface PDFPreviewProps {
   projectId: number | null;
@@ -72,9 +89,13 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
   const requestSequenceRef = useRef(0);
   const lastRequestSentAtRef = useRef<number | null>(null);
   const lastPdfReceivedAtRef = useRef<number | null>(null);
+  const lastPayloadSentAtRef = useRef(0);
   const renderVersionRef = useRef(0);
   const activeLoadingTaskRef = useRef<any>(null);
   const activePageTasksRef = useRef<any[]>([]);
+  const flushErrorLogsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingErrorLogsByKeyRef = useRef<Map<string, PreviewErrorLog>>(new Map());
+  const emittedErrorKeysRef = useRef<Set<string>>(new Set());
   const [isPageVisible, setIsPageVisible] = useState(() =>
     typeof document === "undefined" ? true : document.visibilityState === "visible",
   );
@@ -84,17 +105,67 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
   const [isErrorPanelOpen, setIsErrorPanelOpen] = useState(false);
   const [expandedLogIds, setExpandedLogIds] = useState<Set<number>>(() => new Set());
 
+  const clearErrorFlushTimer = () => {
+    if (flushErrorLogsTimerRef.current) {
+      clearTimeout(flushErrorLogsTimerRef.current);
+      flushErrorLogsTimerRef.current = null;
+    }
+  };
+
+  const flushPendingErrorLogs = () => {
+    if (pendingErrorLogsByKeyRef.current.size === 0) return;
+
+    const entries = Array.from(pendingErrorLogsByKeyRef.current.entries());
+    pendingErrorLogsByKeyRef.current.clear();
+
+    setErrorLogs((prev) => {
+      const next = [...prev];
+      let appended = 0;
+
+      for (const [key, entry] of entries) {
+        if (emittedErrorKeysRef.current.has(key)) continue;
+        emittedErrorKeysRef.current.add(key);
+        next.push(entry);
+        appended += 1;
+      }
+
+      if (appended > 0) {
+        setIsErrorPanelOpen(true);
+      }
+
+      return next;
+    });
+  };
+
+  const scheduleErrorFlush = () => {
+    clearErrorFlushTimer();
+    flushErrorLogsTimerRef.current = setTimeout(() => {
+      const elapsedSinceLastPayload = performance.now() - lastPayloadSentAtRef.current;
+      if (lastPayloadSentAtRef.current > 0 && elapsedSinceLastPayload < previewErrorFlushQuietMs) {
+        scheduleErrorFlush();
+        return;
+      }
+
+      flushPendingErrorLogs();
+    }, previewErrorFlushQuietMs);
+  };
+
   const appendErrorLog = (source: PreviewErrorLog["source"], message: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setErrorLogs((prev) => [
-      ...prev,
-      {
-        id: Date.now() + Math.floor(Math.random() * 1000),
-        timestamp,
-        source,
-        message,
-      },
-    ]);
+    const normalizedMessage = normalizePreviewErrorMessage(message);
+    const key = createErrorFingerprint(source, normalizedMessage);
+
+    if (emittedErrorKeysRef.current.has(key) || pendingErrorLogsByKeyRef.current.has(key)) {
+      return;
+    }
+
+    pendingErrorLogsByKeyRef.current.set(key, {
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      timestamp: new Date().toLocaleTimeString(),
+      source,
+      message: normalizedMessage,
+    });
+
+    scheduleErrorFlush();
   };
 
   const toggleExpandedLog = (id: number) => {
@@ -177,6 +248,7 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
     lastSentPayloadRef.current = key;
     const requestId = ++requestSequenceRef.current;
     lastRequestSentAtRef.current = performance.now();
+    lastPayloadSentAtRef.current = performance.now();
     onStatusChange("Rendering...");
     setError(null);
     ws.send(
@@ -194,6 +266,10 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
       setPdfData(null);
       setError(null);
       setErrorLogs([]);
+      clearErrorFlushTimer();
+      pendingErrorLogsByKeyRef.current.clear();
+      emittedErrorKeysRef.current.clear();
+      lastPayloadSentAtRef.current = 0;
       setIsErrorPanelOpen(false);
       setExpandedLogIds(new Set());
       onStatusChange("Ready");
@@ -271,14 +347,12 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
             if (parsed.error) {
               setError(parsed.error);
               appendErrorLog("websocket", parsed.error);
-              setIsErrorPanelOpen(true);
               onStatusChange("Error");
             }
           } catch {
             const fallbackMessage = event.data || "Preview render failed";
             setError(fallbackMessage);
             appendErrorLog("websocket", fallbackMessage);
-            setIsErrorPanelOpen(true);
             onStatusChange("Error");
           }
         }
@@ -531,7 +605,6 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
             const renderMessage = err instanceof Error ? err.message : String(err ?? "Failed to render PDF");
             setError("Failed to render PDF");
             appendErrorLog("renderer", renderMessage);
-            setIsErrorPanelOpen(true);
             onStatusChange("Error");
           }
         }
@@ -556,6 +629,12 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
       activePageTasksRef.current = [];
     };
   }, [pdfData, isPageVisible, onStatusChange]);
+
+  useEffect(() => {
+    return () => {
+      clearErrorFlushTimer();
+    };
+  }, []);
 
   if (!projectId || !selectedFile) {
     return (

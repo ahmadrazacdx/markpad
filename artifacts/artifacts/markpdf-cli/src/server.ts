@@ -205,6 +205,56 @@ function findPandocBinary(): string {
   return "pandoc";
 }
 
+function resolvePdfEngineBinary(engine: string): string {
+  const normalizedEngine = engine.trim();
+  if (normalizedEngine.length === 0) {
+    return engine;
+  }
+
+  const envKey = `MARKPDF_${normalizedEngine.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_BIN`;
+  const envPath = process.env[envKey];
+  if (typeof envPath === "string" && envPath.trim().length > 0) {
+    const candidate = resolve(envPath.trim());
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  const executableFolder = dirname(process.execPath);
+  const localCandidates = process.platform === "win32"
+    ? [
+        join(executableFolder, `${normalizedEngine}.exe`),
+        join(executableFolder, "bin", `${normalizedEngine}.exe`)
+      ]
+    : [
+        join(executableFolder, normalizedEngine),
+        join(executableFolder, "bin", normalizedEngine)
+      ];
+
+  for (const candidate of localCandidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return normalizedEngine;
+}
+
+function isEngineAvailable(engine: string): boolean {
+  const resolvedBinary = resolvePdfEngineBinary(engine);
+  if (resolvedBinary !== engine) {
+    return true;
+  }
+
+  const commandLocator = process.platform === "win32" ? "where" : "which";
+  const probe = spawnSync(commandLocator, [engine], {
+    stdio: "ignore",
+    timeout: 800
+  });
+
+  return probe.status === 0;
+}
+
 function appendResourcePaths(args: string[], resourcePaths?: string[]): void {
   if (!resourcePaths || resourcePaths.length === 0) {
     return;
@@ -358,15 +408,7 @@ function resolvePdfEngines(): string[] {
       return availablePdfEnginesCache;
     }
 
-    const commandLocator = process.platform === "win32" ? "where" : "which";
-    const available = DEFAULT_PDF_ENGINES.filter((engine) => {
-      const probe = spawnSync(commandLocator, [engine], {
-        stdio: "ignore",
-        timeout: 800
-      });
-
-      return probe.status === 0;
-    });
+    const available = DEFAULT_PDF_ENGINES.filter((engine) => isEngineAvailable(engine));
 
     availablePdfEnginesCache = available.length > 0 ? available : DEFAULT_PDF_ENGINES;
     return availablePdfEnginesCache;
@@ -391,7 +433,7 @@ function isLatexEngine(engine: string): boolean {
 function buildEngineFallbackChain(): string[] {
   const candidates = [...new Set(resolvePdfEngines())];
   if (candidates.length === 0) {
-    return ["pdflatex", "xelatex"];
+    return ["pdflatex", "xelatex", "lualatex", "tectonic", "typst"];
   }
 
   let primary = candidates[0];
@@ -402,14 +444,15 @@ function buildEngineFallbackChain(): string[] {
   }
 
   const chain = [primary];
-  if (primary === "pdflatex" && candidates.includes("xelatex")) {
-    chain.push("xelatex");
+  if (primary === "pdflatex") {
+    for (const preferredFallback of ["xelatex", "lualatex", "tectonic", "typst"]) {
+      if (candidates.includes(preferredFallback) && !chain.includes(preferredFallback)) {
+        chain.push(preferredFallback);
+      }
+    }
   }
 
   for (const engine of candidates) {
-    if (chain.length >= 2) {
-      break;
-    }
     if (!chain.includes(engine)) {
       chain.push(engine);
     }
@@ -482,6 +525,7 @@ async function runPandocWithEngine(
   resourcePaths?: string[]
 ): Promise<void> {
   const pandocBin = findPandocBinary();
+  const engineBinary = resolvePdfEngineBinary(engine);
   const latexHeaderPath = isLatexEngine(engine) ? await ensurePandocLatexHeaderFile() : null;
   const args = [
     "--from",
@@ -490,7 +534,7 @@ async function runPandocWithEngine(
     "-o",
     pdfPath,
     "--pdf-engine",
-    engine,
+    engineBinary,
     ...pandocVariableArgs(settings, engine)
   ];
   appendResourcePaths(args, resourcePaths);

@@ -109,18 +109,52 @@ function normalizeMarkdownImageTarget(rawTarget: string): string {
   return trimmed;
 }
 
-function normalizeAssetReference(rawRef: string): string | null {
+function normalizeAssetPathLikeReference(rawRef: string): string {
   const trimmed = rawRef.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return "";
 
   const noQuotes = trimmed.replace(/^["']|["']$/g, "");
   const noAngles = noQuotes.replace(/^<|>$/g, "");
   const noQueryOrHash = noAngles.split(/[?#]/, 1)[0]?.trim() ?? "";
   const normalizedSlashes = noQueryOrHash.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
-  const normalizedLeading = normalizedSlashes.replace(/^\.\//, "").replace(/^\//, "");
+  return normalizedSlashes.replace(/^\.\//, "").replace(/^\//, "");
+}
+
+function isDirectoryAssetReference(path: string): boolean {
+  return path === "assets" || path === "assets/" || (path.startsWith("assets/") && path.endsWith("/"));
+}
+
+function normalizeAssetReference(rawRef: string): string | null {
+  const normalizedLeading = normalizeAssetPathLikeReference(rawRef);
   if (!normalizedLeading.startsWith("assets/")) return null;
+  if (isDirectoryAssetReference(normalizedLeading)) return null;
 
   return normalizedLeading;
+}
+
+export function extractInvalidDirectoryAssetReferences(markdown: string): string[] {
+  const invalidRefs = new Set<string>();
+  markdownImageRefRegex.lastIndex = 0;
+  typstImageRefRegex.lastIndex = 0;
+
+  let match: RegExpExecArray | null;
+  while ((match = markdownImageRefRegex.exec(markdown)) !== null) {
+    const candidate = match[1] ? normalizeMarkdownImageTarget(match[1]) : (match[2] ?? "");
+    const normalized = normalizeAssetPathLikeReference(candidate);
+    if (isDirectoryAssetReference(normalized)) {
+      invalidRefs.add(normalized);
+    }
+  }
+
+  while ((match = typstImageRefRegex.exec(markdown)) !== null) {
+    const candidate = match[1] ?? match[2] ?? "";
+    const normalized = normalizeAssetPathLikeReference(candidate);
+    if (isDirectoryAssetReference(normalized)) {
+      invalidRefs.add(normalized);
+    }
+  }
+
+  return Array.from(invalidRefs).sort();
 }
 
 export function extractReferencedAssetPaths(markdown: string): string[] {
@@ -631,6 +665,13 @@ export async function renderMarkdownToPdf(
 
   const options: Required<RenderOptions> = { ...DEFAULT_RENDER_OPTIONS, ...(rawOptions ?? {}) };
   const normalizedMarkdown = normalizeMarkdownForPdf(markdown);
+  const invalidDirectoryReferences = extractInvalidDirectoryAssetReferences(normalizedMarkdown);
+  if (invalidDirectoryReferences.length > 0) {
+    const sample = invalidDirectoryReferences.slice(0, 4).join(", ");
+    throw new Error(
+      `Invalid image path points to an assets directory: ${sample}. Use a file path under assets/ (for example assets/image.png).`,
+    );
+  }
 
   await ensureTmpDir();
   const id = randomBytes(8).toString("hex");

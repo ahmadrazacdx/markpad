@@ -100,6 +100,7 @@ export function setupWebSocket(server: Server) {
     let activeRenderAbortController: AbortController | null = null;
     let lastRequestedKey = "";
     let lastRenderedKey = "";
+    let lastBroadcastErrorKey = "";
 
     async function doRender(projectId: number, content: string, options: RenderOptions, requestedAtMs: number) {
       const key = `${projectId}:${content}:${JSON.stringify(options)}`;
@@ -129,6 +130,7 @@ export function setupWebSocket(server: Server) {
         }
 
         lastRenderedKey = key;
+        lastBroadcastErrorKey = "";
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(pdfBytes, { binary: true });
         }
@@ -153,9 +155,19 @@ export function setupWebSocket(server: Server) {
           return;
         }
 
+        const errorMessage = (err as Error)?.message || "Preview render failed";
+        const errorKey = `${key}:${errorMessage}`;
+        if (errorKey === lastBroadcastErrorKey) {
+          if (config.metricsEnabled) {
+            logger.debug({ key }, "Skipping duplicate WebSocket render error for identical content");
+          }
+          return;
+        }
+
+        lastBroadcastErrorKey = errorKey;
         logger.error({ err }, "WebSocket render failed");
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ error: (err as Error).message }));
+          ws.send(JSON.stringify({ error: errorMessage }));
         }
       } finally {
         if (activeRenderAbortController === renderAbortController) {
