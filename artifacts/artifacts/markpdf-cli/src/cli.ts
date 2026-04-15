@@ -4,7 +4,11 @@ import { existsSync } from "node:fs";
 import { startHttpUi } from "./server.js";
 
 declare const __MARKPDF_VERSION__: string;
-const VERSION = __MARKPDF_VERSION__;
+const VERSION = (
+  typeof __MARKPDF_VERSION__ === "string" && __MARKPDF_VERSION__.trim().length > 0
+    ? __MARKPDF_VERSION__
+    : "0.1.3"
+);
 
 function printHelp(): void {
   process.stdout.write(
