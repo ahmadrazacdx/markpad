@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { unzipSync, zipSync } from "fflate";
 import { lintAndFixMarkdown } from "./markdown.js";
@@ -85,6 +86,16 @@ const DEFAULT_CONCURRENCY = 4;
 const ARCHIVE_EXTRACT_CONCURRENCY = 16;
 const FAST_ZIP_LEVEL = 0;
 const DEFAULT_PDF_ENGINES = ["pdflatex", "xelatex", "lualatex", "tectonic"];
+const DEFAULT_BROWSER_BINARIES = [
+  "msedge",
+  "microsoft-edge",
+  "microsoft-edge-stable",
+  "google-chrome",
+  "google-chrome-stable",
+  "chrome",
+  "chromium",
+  "chromium-browser"
+];
 const LATEX_ENGINES = new Set(["xelatex", "lualatex", "pdflatex", "tectonic"]);
 const DEFAULT_SETTINGS: ConvertSettings = {
   pageSize: "a4",
@@ -107,6 +118,9 @@ const artifacts = new Map<string, DownloadArtifact>();
 let pandocLatexHeaderPath: string | null = null;
 let availablePdfEnginesCache: string[] | null = null;
 let lastSuccessfulPdfEngine: string | null = null;
+let availableBrowserBinaryCache: string | null = null;
+let hasProbedBrowserBinary = false;
+let lastSuccessfulBrowserBinary: string | null = null;
 
 const modulePath = typeof __dirname === "string" ? __dirname : process.cwd();
 
@@ -259,13 +273,136 @@ function isEngineAvailable(engine: string): boolean {
     return true;
   }
 
+  return isCommandAvailable(engine);
+}
+
+function isCommandAvailable(command: string): boolean {
   const commandLocator = process.platform === "win32" ? "where" : "which";
-  const probe = spawnSync(commandLocator, [engine], {
+  const probe = spawnSync(commandLocator, [command], {
     stdio: "ignore",
-    timeout: 800
+    timeout: 1000
   });
 
   return probe.status === 0;
+}
+
+function normalizeBinaryCandidate(input: string): string {
+  return input.trim().replace(/^"(.+)"$/, "$1");
+}
+
+function isExplicitBinaryPath(input: string): boolean {
+  return input.includes("/") || input.includes("\\") || input.startsWith(".") || /^[A-Za-z]:/.test(input);
+}
+
+function resolveBinaryCandidate(candidate: string): string | null {
+  const normalized = normalizeBinaryCandidate(candidate);
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  if (isExplicitBinaryPath(normalized)) {
+    const fullPath = resolve(normalized);
+    return existsSync(fullPath) ? fullPath : null;
+  }
+
+  if (existsSync(normalized)) {
+    return normalized;
+  }
+
+  return isCommandAvailable(normalized) ? normalized : null;
+}
+
+function browserNamesFromConfig(): string[] {
+  const envValue = process.env.MARKPDF_BROWSER_BINARIES;
+  if (!envValue) {
+    return DEFAULT_BROWSER_BINARIES;
+  }
+
+  const parsed = envValue
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+
+  return parsed.length > 0 ? parsed : DEFAULT_BROWSER_BINARIES;
+}
+
+function windowsBrowserInstallCandidates(binaryName: string): string[] {
+  if (process.platform !== "win32") {
+    return [];
+  }
+
+  const key = binaryName.toLowerCase().replace(/\.exe$/, "");
+  const roots = [
+    process.env.ProgramFiles,
+    process.env["ProgramFiles(x86)"],
+    process.env.LOCALAPPDATA
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
+
+  if (key.includes("edge")) {
+    return roots.map((root) => join(root, "Microsoft", "Edge", "Application", "msedge.exe"));
+  }
+
+  if (key.includes("chrome")) {
+    return roots.map((root) => join(root, "Google", "Chrome", "Application", "chrome.exe"));
+  }
+
+  if (key.includes("chromium")) {
+    return roots.map((root) => join(root, "Chromium", "Application", "chrome.exe"));
+  }
+
+  return [];
+}
+
+function buildBrowserBinaryCandidates(): string[] {
+  const executableFolder = dirname(process.execPath);
+  const candidates: string[] = [];
+
+  if (lastSuccessfulBrowserBinary) {
+    candidates.push(lastSuccessfulBrowserBinary);
+  }
+
+  const explicitEnvBinary = process.env.MARKPDF_BROWSER_BIN;
+  if (typeof explicitEnvBinary === "string" && explicitEnvBinary.trim().length > 0) {
+    candidates.push(explicitEnvBinary.trim());
+  }
+
+  const browserNames = browserNamesFromConfig();
+  for (const rawName of browserNames) {
+    const normalizedName = normalizeBinaryCandidate(rawName);
+    if (normalizedName.length === 0) {
+      continue;
+    }
+
+    const executableName = process.platform === "win32" && !normalizedName.toLowerCase().endsWith(".exe")
+      ? `${normalizedName}.exe`
+      : normalizedName;
+
+    candidates.push(join(executableFolder, executableName));
+    candidates.push(join(executableFolder, "bin", executableName));
+    candidates.push(normalizedName);
+    candidates.push(...windowsBrowserInstallCandidates(normalizedName));
+  }
+
+  return [...new Set(candidates.map(normalizeBinaryCandidate).filter((entry) => entry.length > 0))];
+}
+
+function findBrowserBinary(): string | null {
+  if (hasProbedBrowserBinary) {
+    return availableBrowserBinaryCache;
+  }
+
+  for (const candidate of buildBrowserBinaryCandidates()) {
+    const resolvedBinary = resolveBinaryCandidate(candidate);
+    if (resolvedBinary) {
+      availableBrowserBinaryCache = resolvedBinary;
+      hasProbedBrowserBinary = true;
+      return resolvedBinary;
+    }
+  }
+
+  availableBrowserBinaryCache = null;
+  hasProbedBrowserBinary = true;
+  return null;
 }
 
 function appendResourcePaths(args: string[], resourcePaths?: string[]): void {
@@ -412,6 +549,86 @@ function pandocVariableArgs(settings: ConvertSettings, engine?: string): string[
   }
 
   return args;
+}
+
+function cssPageSizeFromSetting(pageSize: PageSize): string {
+  switch (pageSize) {
+    case "letter":
+      return "letter";
+    case "legal":
+      return "legal";
+    case "a5":
+      return "a5";
+    case "b5":
+      return "176mm 250mm";
+    case "executive":
+      return "7.25in 10.5in";
+    case "a4":
+    default:
+      return "a4";
+  }
+}
+
+function cssFontFamilyFromSetting(font: DocumentFont): string {
+  switch (font) {
+    case "times-new-roman":
+      return '"Times New Roman", Times, "Liberation Serif", serif';
+    case "palatino":
+      return 'Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif';
+    case "helvetica":
+      return 'Helvetica, Arial, "Liberation Sans", sans-serif';
+    case "computer-modern":
+    case "latin-modern":
+    default:
+      return '"Latin Modern Roman", "CMU Serif", "Times New Roman", serif';
+  }
+}
+
+function buildBrowserPrintStyles(settings: ConvertSettings): string {
+  const pageSize = cssPageSizeFromSetting(settings.pageSize);
+  const margin = geometryMarginFromPreset(settings.geometryPreset);
+  const fontFamily = cssFontFamilyFromSetting(settings.documentFont);
+
+  return [
+    "@page {",
+    `  size: ${pageSize};`,
+    `  margin: ${margin};`,
+    "}",
+    "html {",
+    `  font-size: ${settings.fontSizePt}pt;`,
+    "}",
+    "body {",
+    `  font-family: ${fontFamily};`,
+    `  line-height: ${settings.lineStretch};`,
+    "  color: #111;",
+    "  overflow-wrap: anywhere;",
+    "  word-break: break-word;",
+    "}",
+    "img, svg, video, canvas {",
+    "  max-width: 100%;",
+    "  height: auto;",
+    "}",
+    "pre, code {",
+    "  white-space: pre-wrap;",
+    "  word-break: break-word;",
+    "}",
+    "table {",
+    "  width: 100%;",
+    "  border-collapse: collapse;",
+    "}",
+    "table, pre, blockquote {",
+    "  break-inside: avoid;",
+    "}"
+  ].join("\n");
+}
+
+function injectHtmlStyles(html: string, styles: string): string {
+  const styleTag = `<style id=\"markpdf-browser-print\">\n${styles}\n</style>`;
+  if (html.includes("</head>")) {
+    return html.replace("</head>", `${styleTag}\n</head>`);
+  }
+
+  return `${styleTag}\n${html}`;
 }
 
 function resolvePdfEngines(): string[] {
@@ -600,6 +817,164 @@ async function runPandocWithEngine(
   });
 }
 
+async function runPandocToHtml(
+  markdownPath: string,
+  htmlPath: string,
+  settings: ConvertSettings,
+  cwd?: string,
+  resourcePaths?: string[]
+): Promise<void> {
+  const pandocBin = findPandocBinary();
+  const args = [
+    "--from",
+    "markdown+pipe_tables+grid_tables+multiline_tables+table_captions+tex_math_dollars+raw_tex",
+    "--to",
+    "html5",
+    "--standalone",
+    markdownPath,
+    "-o",
+    htmlPath
+  ];
+  appendResourcePaths(args, resourcePaths);
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(pandocBin, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+
+    child.on("error", (error) => {
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(stderr.trim() || `pandoc failed with exit code ${code ?? "unknown"}`));
+    });
+  });
+
+  const html = await readFile(htmlPath, "utf8");
+  const styledHtml = injectHtmlStyles(html, buildBrowserPrintStyles(settings));
+  await writeFile(htmlPath, styledHtml, "utf8");
+}
+
+async function runBrowserPrintToPdf(
+  browserBinary: string,
+  htmlPath: string,
+  pdfPath: string,
+  cwd?: string
+): Promise<void> {
+  const browserProfileDir = await mkdtemp(join(tmpdir(), "markpdf-browser-profile-"));
+  const targetUrl = pathToFileURL(htmlPath).toString();
+  const sharedArgs = [
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+    "--allow-file-access-from-files",
+    "--no-first-run",
+    "--no-default-browser-check",
+    `--user-data-dir=${browserProfileDir}`,
+    `--print-to-pdf=${pdfPath}`,
+    "--print-to-pdf-no-header",
+    targetUrl
+  ];
+
+  const shouldDisableSandbox =
+    process.platform === "linux" &&
+    typeof process.getuid === "function" &&
+    process.getuid() === 0;
+
+  if (shouldDisableSandbox) {
+    sharedArgs.unshift("--no-sandbox");
+  }
+
+  let lastError: Error | null = null;
+
+  try {
+    for (const headlessFlag of ["--headless=new", "--headless"]) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn(browserBinary, [headlessFlag, ...sharedArgs], {
+            cwd,
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true
+          });
+
+          let stderr = "";
+          let stdout = "";
+
+          child.stderr.on("data", (chunk) => {
+            stderr += String(chunk);
+          });
+
+          child.stdout.on("data", (chunk) => {
+            stdout += String(chunk);
+          });
+
+          child.on("error", (error) => {
+            reject(error);
+          });
+
+          child.on("close", (code) => {
+            if (code === 0) {
+              resolve();
+              return;
+            }
+
+            const detail = [stderr.trim(), stdout.trim()].filter((entry) => entry.length > 0).join("\n");
+            reject(new Error(detail || `browser print failed with exit code ${code ?? "unknown"}`));
+          });
+        });
+
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+  } finally {
+    await rm(browserProfileDir, { recursive: true, force: true });
+  }
+
+  const output = await stat(pdfPath);
+  if (!output.isFile() || output.size < 32) {
+    throw new Error("Browser print did not produce a valid PDF output");
+  }
+}
+
+async function runPandocWithBrowserFallback(
+  markdownPath: string,
+  pdfPath: string,
+  settings: ConvertSettings,
+  cwd?: string,
+  resourcePaths?: string[]
+): Promise<string> {
+  const browserBinary = findBrowserBinary();
+  if (!browserBinary) {
+    throw new Error(
+      "No supported browser was detected for HTML print fallback. Install Microsoft Edge, Google Chrome, or Chromium, or set MARKPDF_BROWSER_BIN."
+    );
+  }
+
+  const htmlPath = `${markdownPath}.markpdf-browser-print.html`;
+  await runPandocToHtml(markdownPath, htmlPath, settings, cwd, resourcePaths);
+  await runBrowserPrintToPdf(browserBinary, htmlPath, pdfPath, cwd);
+  lastSuccessfulBrowserBinary = browserBinary;
+  return browserBinary;
+}
+
 async function runPandocWithFallback(
   markdownPath: string,
   pdfPath: string,
@@ -612,19 +987,9 @@ async function runPandocWithFallback(
   const engines = buildEngineFallbackChain();
   const errors: string[] = [];
 
-  if (engines.length === 0) {
-    logs.push(`[${fileName}] no available PDF engines detected`);
-    throw new RequestError(
-      `Error producing PDF for ${fileName}`,
-      422,
-      {
-        details: ["No supported PDF engine was detected. Install one of: pdflatex, xelatex, lualatex, tectonic."],
-        logs
-      }
-    );
+  if (engines.length > 0) {
+    logs.push(`[${fileName}] engine chain: ${engines.join(" -> ")}`);
   }
-
-  logs.push(`[${fileName}] engine chain: ${engines.join(" -> ")}`);
 
   for (let i = 0; i < engines.length; i += 1) {
     const engine = engines[i];
@@ -666,22 +1031,35 @@ async function runPandocWithFallback(
         continue;
       }
 
-      throw new RequestError(
-        `Error producing PDF for ${fileName}`,
-        422,
-        {
-          details: errors.slice(0, 8),
-          logs
-        }
-      );
+      logs.push(`[${fileName}] ${engine} failed without a viable LaTeX fallback`);
+      break;
     }
+  }
+
+  try {
+    const browserBinary = await runPandocWithBrowserFallback(markdownPath, pdfPath, settings, cwd, resourcePaths);
+    const browserLabel = isExplicitBinaryPath(browserBinary) ? basename(browserBinary) : browserBinary;
+    logs.push(`[${fileName}] rendered with browser fallback (${browserLabel})`);
+    return `browser:${browserLabel}`;
+  } catch (browserError) {
+    const browserReason = summarizePandocFailure(browserError instanceof Error ? browserError.message : String(browserError));
+    errors.push(`browser-fallback: ${browserReason}`);
+    logs.push(`[${fileName}] browser fallback failed: ${browserReason}`);
+  }
+
+  if (engines.length === 0) {
+    logs.push(`[${fileName}] no available LaTeX PDF engines detected`);
   }
 
   throw new RequestError(
     `Error producing PDF for ${fileName}`,
     422,
     {
-      details: errors.slice(0, 8),
+      details: errors.length > 0
+        ? errors.slice(0, 8)
+        : [
+            "No supported PDF rendering backend was detected. Install Microsoft Edge, Google Chrome, or Chromium, or one of: pdflatex, xelatex, lualatex, tectonic."
+          ],
       logs
     }
   );

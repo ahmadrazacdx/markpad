@@ -13,8 +13,15 @@ Minimal terminal-first Markdown to PDF converter:
 - Project bundles can be uploaded as a folder (markdown + assets) or a `.zip` archive.
 - Validates and auto-fixes common Markdown layout issues using `markdownlint` style rules.
 - Converts with `pandoc`.
+- Automatically falls back to headless browser PDF print (Edge/Chrome/Chromium) when LaTeX PDF engines are unavailable.
 - Batch mode up to 50 files using async conversion.
 - Returns a single PDF for one file, or a ZIP for batch output.
+
+## Rendering Backends
+
+- Primary path: Pandoc with LaTeX engines (`pdflatex`, `xelatex`, `lualatex`, `tectonic`) when available.
+- Fallback path: Pandoc HTML output + headless browser print when no LaTeX engine is detected or LaTeX rendering fails.
+- Optional override: set `MARKPDF_BROWSER_BIN` to force a specific browser executable path.
 
 ## Local Dev
 

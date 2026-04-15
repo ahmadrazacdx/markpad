@@ -1,4 +1,8 @@
 import { build } from "esbuild";
+import { readFileSync } from "node:fs";
+
+const packageJson = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
+const markpdfVersion = String(packageJson.version ?? "0.0.0");
 
 await Promise.all([
   build({
@@ -8,6 +12,9 @@ await Promise.all([
     format: "cjs",
     target: ["node20"],
     outfile: "dist/markpdf.cjs",
+    define: {
+      __MARKPDF_VERSION__: JSON.stringify(markpdfVersion),
+    },
     minify: true,
     sourcemap: false,
     legalComments: "none"

@@ -85,6 +85,8 @@ markpdf uninstall
 - Supports batch mode (up to 50 files).
 - Returns a single PDF for one file, or a ZIP for batch output.
 
+> **Warning**: MarkPDF is an experimental tool and is not guaranteed to work.
+
 ## Development
 
 For web development of the editor + backend, run these in separate terminals:
