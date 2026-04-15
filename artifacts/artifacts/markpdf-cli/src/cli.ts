@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
 import { startHttpUi } from "./server.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.2";
 
 function printHelp(): void {
   process.stdout.write(

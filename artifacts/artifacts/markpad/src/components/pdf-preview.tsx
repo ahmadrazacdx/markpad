@@ -34,19 +34,20 @@ const previewLivePageCap = parsePreviewInt(import.meta.env.VITE_PREVIEW_LIVE_PAG
 const previewErrorFlushQuietMs = parsePreviewInt(import.meta.env.VITE_PREVIEW_ERROR_FLUSH_MS, 500, 150, 3000);
 
 function normalizePreviewErrorMessage(message: string): string {
-  const compact = message.replace(/\s+/g, " ").trim();
-  if (!compact) return "Unknown preview error";
-
-  if (/^Invalid image path points to an assets directory:/i.test(compact)) {
-    return "Invalid image path points to an assets directory. Use a file path under assets/.";
-  }
-
-  return compact;
+  const trimmed = message.trim();
+  if (!trimmed) return "Unknown preview error";
+  return trimmed;
 }
 
 function createErrorFingerprint(source: PreviewErrorLog["source"], message: string): string {
-  const firstLine = message.split(/\r?\n/, 1)[0] ?? message;
-  return `${source}:${firstLine.toLowerCase()}`;
+  const firstLine = (message.split(/\r?\n/, 1)[0] ?? message).trim().toLowerCase();
+
+  // Treat transient typing states like `assets` and `assets/` as one logical error.
+  if (firstLine.startsWith("invalid image path points to an assets directory:")) {
+    return `${source}:invalid-assets-directory`;
+  }
+
+  return `${source}:${firstLine}`;
 }
 
 interface PDFPreviewProps {
@@ -112,6 +113,14 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
     }
   };
 
+  const clearPreviewErrorLogs = () => {
+    clearErrorFlushTimer();
+    pendingErrorLogsByKeyRef.current.clear();
+    emittedErrorKeysRef.current.clear();
+    setErrorLogs([]);
+    setExpandedLogIds(new Set());
+  };
+
   const flushPendingErrorLogs = () => {
     if (pendingErrorLogsByKeyRef.current.size === 0) return;
 
@@ -127,10 +136,6 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
         emittedErrorKeysRef.current.add(key);
         next.push(entry);
         appended += 1;
-      }
-
-      if (appended > 0) {
-        setIsErrorPanelOpen(true);
       }
 
       return next;
@@ -265,13 +270,9 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
     if (!projectId || !selectedFile) {
       setPdfData(null);
       setError(null);
-      setErrorLogs([]);
-      clearErrorFlushTimer();
-      pendingErrorLogsByKeyRef.current.clear();
-      emittedErrorKeysRef.current.clear();
+      clearPreviewErrorLogs();
       lastPayloadSentAtRef.current = 0;
       setIsErrorPanelOpen(false);
-      setExpandedLogIds(new Set());
       onStatusChange("Ready");
     }
   }, [projectId, selectedFile, onStatusChange]);
@@ -329,6 +330,7 @@ export function PDFPreview({ projectId, selectedFile, content, preferences, onSt
           }
           setPdfData(new Uint8Array(safeBuffer));
           setError(null);
+          clearPreviewErrorLogs();
         };
 
         if (event.data instanceof ArrayBuffer) {
