@@ -1,6 +1,6 @@
 {
   "name": "@workspace/markpdf-cli",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Minimal local Markdown-to-PDF CLI that opens a localhost UI",

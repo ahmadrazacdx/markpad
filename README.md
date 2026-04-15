@@ -1,5 +1,5 @@
 <div align="center">
-	<img src="artifacts/artifacts/markpad/public/favicon.svg" alt="MarkPad logo" width="120" height="120" />
+	<img src="artifacts/artifacts/markpad/public/banner.svg" alt="MarkPad logo"/>
 </div>
 
 # MarkPad
@@ -26,10 +26,12 @@ Detailed MarkPDF notes are in [artifacts/artifacts/markpdf-cli/README.md](artifa
 
 ## What It Looks Like
 
+### MarkPad
 <div align="center">
 	<img src="artifacts/artifacts/markpad/public/markpad_preview.png" alt="MarkPad UI screenshot" />
 </div>
 
+### MarkPDF
 <div align="center">
 	<img src="artifacts/artifacts/markpad/public/markpdf_preview.png" alt="MarkPDF UI screenshot" />
 </div>
