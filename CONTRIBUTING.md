@@ -1,6 +1,6 @@
-# Contributing to MarkPad
+# Contributing to MarkTex
 
-Thanks for your interest in improving MarkPad.
+Thanks for your interest in improving MarkTex.
 
 ## Ground Rules
 
@@ -28,7 +28,7 @@ Useful commands:
 pnpm run typecheck
 pnpm run build
 pnpm --filter @workspace/api-server run dev
-pnpm --filter @workspace/markpad run dev
+pnpm --filter @workspace/marktex run dev
 ```
 
 ## Code Style

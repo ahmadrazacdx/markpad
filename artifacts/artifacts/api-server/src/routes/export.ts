@@ -182,7 +182,7 @@ router.post("/projects/:projectId/export/latex", async (req, res) => {
     const options = parseRenderOptions((req.body as { options?: unknown })?.options);
     const latex = await renderMarkdownToLatex(content, options);
     res.setHeader("Content-Type", "application/x-latex");
-    res.setHeader("Content-Disposition", "attachment; filename=markpad.tex");
+    res.setHeader("Content-Disposition", "attachment; filename=marktex.tex");
     res.send(latex);
   } catch (err) {
     handleRouteError(req, res, err, {

@@ -35,8 +35,8 @@ const server = app.listen(port, (err) => {
 
 setupWebSocket(server);
 
-const disableRendererWarmup = process.env.MARKPAD_DISABLE_RENDERER_WARMUP === "1";
-const warmupDelayMs = parseWarmupDelayMs(process.env.MARKPAD_RENDERER_WARMUP_DELAY_MS);
+const disableRendererWarmup = process.env.MARKTEX_DISABLE_RENDERER_WARMUP === "1";
+const warmupDelayMs = parseWarmupDelayMs(process.env.MARKTEX_RENDERER_WARMUP_DELAY_MS);
 
 if (!disableRendererWarmup) {
   if (warmupDelayMs > 0) {
@@ -48,5 +48,5 @@ if (!disableRendererWarmup) {
     void prewarmPdfRenderer();
   }
 } else {
-  logger.info("PDF renderer warmup disabled by MARKPAD_DISABLE_RENDERER_WARMUP");
+  logger.info("PDF renderer warmup disabled by MARKTEX_DISABLE_RENDERER_WARMUP");
 }

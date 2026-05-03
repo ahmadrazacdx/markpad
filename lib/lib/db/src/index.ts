@@ -4,8 +4,8 @@ import { mkdir } from "fs/promises";
 import path from "path";
 import * as schema from "./schema";
 
-const dataDir = path.resolve(process.env.MARKPAD_DATA_DIR ?? ".markpad");
-const dbPath = path.resolve(process.env.MARKPAD_DB_PATH ?? path.join(dataDir, "markpad.db"));
+const dataDir = path.resolve(process.env.MARKTEX_DATA_DIR ?? ".marktex");
+const dbPath = path.resolve(process.env.MARKTEX_DB_PATH ?? path.join(dataDir, "marktex.db"));
 const supportedDatabaseSchemes = new Set(["libsql", "wss", "ws", "https", "http", "file"]);
 
 function getScheme(url: string): string | null {
@@ -23,7 +23,7 @@ const databaseUrl =
 
 if (envDatabaseUrl && (!envDatabaseScheme || !supportedDatabaseSchemes.has(envDatabaseScheme))) {
   console.warn(
-    `[markpad-db] Ignoring unsupported DATABASE_URL scheme (${envDatabaseScheme ?? "unknown"}) and falling back to local file database.`,
+    `[marktex-db] Ignoring unsupported DATABASE_URL scheme (${envDatabaseScheme ?? "unknown"}) and falling back to local file database.`,
   );
 }
 

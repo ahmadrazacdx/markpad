@@ -1,12 +1,12 @@
 <div align="center">
-	<img src="artifacts/artifacts/markpad/public/banner.svg" alt="MarkPad logo"/>
+	<img src="artifacts/artifacts/marktex/public/banner.svg" alt="MarkTex logo"/>
 </div>
 
-# MarkPad
+# MarkTex
 
-[![Release](https://img.shields.io/github/v/release/ahmadrazacdx/markpad?display_name=tag)](https://github.com/ahmadrazacdx/markpad/releases)
-[![License](https://img.shields.io/github/license/ahmadrazacdx/markpad)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](https://github.com/ahmadrazacdx/markpad/releases)
+[![Release](https://img.shields.io/github/v/release/ahmadrazacdx/marktex?display_name=tag)](https://github.com/ahmadrazacdx/marktex/releases)
+[![License](https://img.shields.io/github/license/ahmadrazacdx/marktex)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](https://github.com/ahmadrazacdx/marktex/releases)
 
 *Overleaf For People Who Think In Markdown.*
 
@@ -14,26 +14,26 @@ I built this because writing LaTeX directly in Overleaf felt tedious for my day-
 I moved to Markdown + Pandoc in VS Code, but that became command-heavy very quickly, and previewing output meant constantly switching context.
 I wanted one small, offline tool where I can write Markdown and see a live PDF preview in real time.
 
-**MarkPad** is that tool.
+**MarkTex** is that tool.
 
 ## What This Repository Contains
 
-1. **MarkPad**: a local-first desktop writing app (editor + project manager + live PDF preview + version control).
+1. **MarkTex**: a local-first desktop writing app (editor + project manager + live PDF preview + version control).
 2. **MarkPDF**: a Markdown-to-PDF tool that opens as localhost browser tab.
 
-The idea is simple: MarkPad for full writing workflow, MarkPDF for quick conversion jobs.
+The idea is simple: MarkTex for full writing workflow, MarkPDF for quick conversion jobs.
 Detailed MarkPDF notes are in [artifacts/artifacts/markpdf-cli/README.md](artifacts/artifacts/markpdf-cli/README.md).
 
 ## What It Looks Like
 
-### MarkPad
+### MarkTex
 <div align="center">
-	<img src="artifacts/artifacts/markpad/public/markpad_preview.png" alt="MarkPad UI screenshot" />
+	<img src="artifacts/artifacts/marktex/public/marktex_preview.png" alt="MarkTex UI screenshot" />
 </div>
 
 ### MarkPDF
 <div align="center">
-	<img src="artifacts/artifacts/markpad/public/markpdf_preview.png" alt="MarkPDF UI screenshot" />
+	<img src="artifacts/artifacts/marktex/public/markpdf_preview.png" alt="MarkPDF UI screenshot" />
 </div>
 
 ## Core Behavior
@@ -46,18 +46,18 @@ Detailed MarkPDF notes are in [artifacts/artifacts/markpdf-cli/README.md](artifa
 
 ## Install (Windows)
 
-1. Open [Releases](https://github.com/ahmadrazacdx/markpad/releases).
-2. Download the latest MarkPad installer.
-3. Run the installer and launch MarkPad.
+1. Open [Releases](https://github.com/ahmadrazacdx/marktex/releases).
+2. Download the latest MarkTex installer.
+3. Run the installer and launch MarkTex.
 4. Optional: install MarkPDF from the same release artifacts.
 
 ## Quick Start
 
-### MarkPad (desktop app)
+### MarkTex (desktop app)
 
 ```bash
 pnpm install
-pnpm --filter @workspace/markpad run tauri:dev
+pnpm --filter @workspace/marktex run tauri:dev
 ```
 
 ### MarkPDF (CLI + localhost UI)
@@ -97,7 +97,7 @@ PORT=8080 pnpm run dev
 ```
 
 ```bash
-cd artifacts/artifacts/markpad
+cd artifacts/artifacts/marktex
 pnpm run dev
 ```
 
@@ -116,7 +116,7 @@ pnpm run build
 Windows desktop build:
 
 ```bash
-pnpm --filter @workspace/markpad run tauri:build:windows
+pnpm --filter @workspace/marktex run tauri:build:windows
 ```
 
 MarkPDF Windows CLI payload:
@@ -148,15 +148,15 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ## License
 
 Distributed under the terms of the [MIT license][license],
-MarkPad is free and open source software.
+MarkTex is free and open source software.
 
 ## Issues & Support
 
 If you encounter any problems:
 
-- **[File an Issue](https://github.com/ahmadrazacdx/markpad/issues)**: Bug reports and feature requests
-- **[Discussions](https://github.com/ahmadrazacdx/markpad/discussions)**: Questions and community support
-- **[Documentation](https://github.com/ahmadrazacdx/markpad/tree/main/docs)**: Project docs and release notes
+- **[File an Issue](https://github.com/ahmadrazacdx/marktex/issues)**: Bug reports and feature requests
+- **[Discussions](https://github.com/ahmadrazacdx/marktex/discussions)**: Questions and community support
+- **[Documentation](https://github.com/ahmadrazacdx/marktex/tree/main/docs)**: Project docs and release notes
 
 ## AI Usage Disclosure
 

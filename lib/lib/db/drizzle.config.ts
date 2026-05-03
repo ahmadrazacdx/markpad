@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
 
-const defaultDbPath = path.resolve(process.cwd(), ".markpad", "markpad.db");
+const defaultDbPath = path.resolve(process.cwd(), ".marktex", "marktex.db");
 fs.mkdirSync(path.dirname(defaultDbPath), { recursive: true });
 
 const dbUrl = process.env.DATABASE_URL ?? pathToFileURL(defaultDbPath).toString();

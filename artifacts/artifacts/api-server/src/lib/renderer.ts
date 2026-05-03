@@ -8,7 +8,7 @@ import { db } from "@workspace/db";
 import { filesTable } from "@workspace/db";
 import { logger } from "./logger";
 
-const tmpDir = join(tmpdir(), "markpad-render");
+const tmpDir = join(tmpdir(), "marktex-render");
 
 export interface RenderOptions {
   pageSize?: "a4" | "letter" | "legal" | "a5";
@@ -35,7 +35,7 @@ let latexEngineUnavailable = false;
 let typstLinkStyleIncludeFilePath: string | null = null;
 
 function isLatexEngineDisabledByConfig(): boolean {
-  const value = process.env.MARKPAD_PDF_DISABLE_LATEX?.trim().toLowerCase();
+  const value = process.env.MARKTEX_PDF_DISABLE_LATEX?.trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 
@@ -293,8 +293,8 @@ ${latexFontBlock(options.documentFont)}
 \setlength{\tabcolsep}{7pt}
 \renewcommand{\arraystretch}{1.2}
 \urlstyle{same}
-\let\markpadhref\href
-\renewcommand{\href}[2]{\markpadhref{#1}{\textcolor{blue}{\underline{#2}}}}
+\let\marktexhref\href
+\renewcommand{\href}[2]{\marktexhref{#1}{\textcolor{blue}{\underline{#2}}}}
 \sloppy
 \setstretch{${options.lineStretch}}
 \providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
@@ -552,7 +552,7 @@ export function normalizeMarkdownForPdf(markdown: string): string {
 }
 
 function resolvePandocBinary(): string {
-  const configured = process.env.MARKPAD_PANDOC_BIN?.trim();
+  const configured = process.env.MARKTEX_PANDOC_BIN?.trim();
   if (configured && configured.length > 0) {
     return isAbsolute(configured) ? configured : resolve(configured);
   }
@@ -565,7 +565,7 @@ function resolvePdfEngineBinary(engine: "typst" | "latex"): string {
     return "pdflatex";
   }
 
-  const configured = process.env.MARKPAD_TYPST_BIN?.trim();
+  const configured = process.env.MARKTEX_TYPST_BIN?.trim();
   if (configured && configured.length > 0) {
     return isAbsolute(configured) ? configured : resolve(configured);
   }
@@ -760,7 +760,7 @@ export async function renderMarkdownToPdf(
 export function prewarmPdfRenderer() {
   if (warmupPromise) return warmupPromise;
 
-  warmupPromise = renderMarkdownToPdf("# MarkPad\n\nPreview warmup.", DEFAULT_RENDER_OPTIONS)
+  warmupPromise = renderMarkdownToPdf("# MarkTex\n\nPreview warmup.", DEFAULT_RENDER_OPTIONS)
     .then(() => {
       logger.info("PDF renderer warmup completed");
     })

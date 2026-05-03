@@ -47,9 +47,9 @@ Thumbs.db
 .cache/
 .local/
 
-# MarkPad desktop generated resources
-artifacts/artifacts/markpad/src-tauri/resources/backend/
-artifacts/artifacts/markpad/src-tauri/resources/runtime/
-artifacts/artifacts/markpad/src-tauri/resources/bin/
-artifacts/artifacts/api-server/.markpad/
-artifacts/artifacts/markpad/src-tauri/nsis/installer.nsi
+# MarkTex desktop generated resources
+artifacts/artifacts/marktex/src-tauri/resources/backend/
+artifacts/artifacts/marktex/src-tauri/resources/runtime/
+artifacts/artifacts/marktex/src-tauri/resources/bin/
+artifacts/artifacts/api-server/.marktex/
+artifacts/artifacts/marktex/src-tauri/nsis/installer.nsi

@@ -33,9 +33,9 @@ function parseIntegerSetting(
 
 export function resolveWebSocketPreviewConfig(env: NodeJS.ProcessEnv = process.env): WebSocketPreviewConfig {
   return {
-    debounceMs: parseIntegerSetting(env.MARKPAD_PREVIEW_WS_DEBOUNCE_MS, DEFAULT_WS_PREVIEW_DEBOUNCE_MS, 0, 500),
-    cancelInFlight: env.MARKPAD_PREVIEW_CANCEL_INFLIGHT !== "0",
-    metricsEnabled: env.MARKPAD_PREVIEW_METRICS === "1",
+    debounceMs: parseIntegerSetting(env.MARKTEX_PREVIEW_WS_DEBOUNCE_MS, DEFAULT_WS_PREVIEW_DEBOUNCE_MS, 0, 500),
+    cancelInFlight: env.MARKTEX_PREVIEW_CANCEL_INFLIGHT !== "0",
+    metricsEnabled: env.MARKTEX_PREVIEW_METRICS === "1",
   };
 }
 
